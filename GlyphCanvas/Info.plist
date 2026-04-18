@@ -2,9 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>remote-notification</string>
-	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>GlyphCanvas uses the camera when you choose to take a new photo as the source image.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>GlyphCanvas needs access to your photo library so you can pick a source image.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>GlyphCanvas can save exported images to your photo library when you choose Export.</string>
+	<key>GlyphCanvasAppStoreID</key>
+	<string></string>
+	<key>GlyphCanvasPrivacyPolicyURL</key>
+	<string></string>
+	<key>GlyphCanvasTermsURL</key>
+	<string></string>
 </dict>
 </plist>
