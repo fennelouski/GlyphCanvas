@@ -8,7 +8,7 @@ import Foundation
 
 /// Prior glyph in the same grid cell (temporal smoothing / cell-history penalty).
 struct GlyphCellPrior: Sendable {
-    let character: Character
+    let stamp: String
     let fontSize: CGFloat
     let rotationDegrees: Int
 }

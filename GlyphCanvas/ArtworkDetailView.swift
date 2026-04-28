@@ -14,6 +14,9 @@ struct ArtworkDetailView: View {
     @State private var manifest: ArtworkManifest?
     @State private var loadError: String?
     @State private var showDeleteConfirm = false
+    @State private var showExportSheet = false
+    @State private var exportInFlight = false
+    @State private var exportMessage: String?
 
     var body: some View {
         Group {
@@ -26,7 +29,7 @@ struct ArtworkDetailView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .navigationTitle("Artwork")
+        .navigationTitle(manifest.map { GalleryArchiveNaming.displayTitle(titlePrefix: $0.titlePrefix, for: $0.id) } ?? "Artwork")
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -49,6 +52,17 @@ struct ArtworkDetailView: View {
                 deleteArtwork()
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $showExportSheet) {
+            if let m = manifest {
+                ArtworkExportSheet(
+                    manifest: m,
+                    isExporting: $exportInFlight,
+                    onChoose: { resolution in
+                        await exportArtwork(manifest: m, resolution: resolution)
+                    }
+                )
+            }
         }
     }
 
@@ -79,23 +93,24 @@ struct ArtworkDetailView: View {
                 }
                 .buttonStyle(.borderedProminent)
 
-                if let url = previewFileURL {
-                    ShareLink(item: url) {
-                        Label("Share image", systemImage: "square.and.arrow.up")
-                            .frame(maxWidth: .infinity)
-                            .padding(10)
-                    }
-                    .buttonStyle(.bordered)
+                Button {
+                    showExportSheet = true
+                } label: {
+                    Label("Export…", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                        .padding(10)
+                }
+                .buttonStyle(.bordered)
+
+                if let msg = exportMessage {
+                    Text(msg)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding()
         }
-    }
-
-    private var previewFileURL: URL? {
-        let url = library.previewURL(for: artworkId)
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return url
     }
 
     @ViewBuilder
@@ -135,6 +150,43 @@ struct ArtworkDetailView: View {
             dismiss()
         } catch {
             loadError = error.localizedDescription
+        }
+    }
+
+    private func exportArtwork(manifest: ArtworkManifest, resolution: ArtworkExportResolution) async {
+        let renderResult = await Task.detached {
+            Result { try ArtworkExporter.renderImage(manifest: manifest, resolution: resolution) }
+        }.value
+
+        switch renderResult {
+        case .success(let image):
+            guard let data = ArtworkExporter.encodePNG(image) else {
+                await MainActor.run {
+                    exportMessage = "Could not encode PNG."
+                    showExportSheet = false
+                }
+                return
+            }
+            let name = "GlyphCanvas-\(manifest.id.uuidString.prefix(8)).png"
+            let saveResult = await PNGExportPlatform.save(data: data, suggestedFilename: name)
+            await MainActor.run {
+                switch saveResult {
+                case .success(let message):
+                    exportMessage = message
+                case .failure(let error):
+                    if error is PNGExportUserCancelled {
+                        exportMessage = nil
+                    } else {
+                        exportMessage = "Save failed: \(error.localizedDescription)"
+                    }
+                }
+                showExportSheet = false
+            }
+        case .failure(let error):
+            await MainActor.run {
+                exportMessage = "Export failed: \(error.localizedDescription)"
+                showExportSheet = false
+            }
         }
     }
 }

@@ -169,9 +169,31 @@ enum PerceptualScoring {
     static let chromaTermWeight: Double = 0.3
 }
 
+/// Tunable weights for edge-guided encoding loss (mean terms in 0…1 space).
+enum EdgeGuidedScoring {
+    static let lambdaOffEdge: Double = 1.0
+    static let lambdaMissedEdge: Double = 0.85
+    /// Minimum edge strength so flat regions still penalize stray ink in `(1 - e)`.
+    static let edgeStrengthFloor: Double = 0.04
+}
+
 enum ImageProcessing {
     /// Legacy full set (reference / tests).
     static let candidateCharacters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,:;!?@#$%&*+-=/\\|()[]{}")
+
+    /// Rough ink density for a stamp (word, emoji cluster, or single character). Unknown scalars default to mid.
+    static func nominalInkDensity(for stamp: String) -> Double {
+        guard !stamp.isEmpty else { return 0.5 }
+        var sum = 0.0
+        var n = 0
+        for ch in stamp {
+            sum += nominalInkDensity(for: ch)
+            n += 1
+        }
+        let avg = sum / Double(max(1, n))
+        let lengthBias = 0.012 * Double(min(stamp.count, 32))
+        return min(1.0, avg + lengthBias)
+    }
 
     /// Rough ink density for coverage-aware bucketing (0 = light, 1 = heavy). Unknown characters default to mid.
     private static func nominalInkDensity(for character: Character) -> Double {
@@ -194,7 +216,7 @@ enum ImageProcessing {
     }
 
     /// Splits the user pool into three non-empty density tiers (high → low ink) for luminance-biased sampling.
-    private static func densityTiers(from pool: [Character]) -> (dense: [Character], medium: [Character], light: [Character]) {
+    private static func densityTiers(from pool: [String]) -> (dense: [String], medium: [String], light: [String]) {
         let sortedPairs = pool.map { ($0, nominalInkDensity(for: $0)) }.sorted { $0.1 > $1.1 }
         let chars = sortedPairs.map(\.0)
         let n = chars.count
@@ -317,6 +339,40 @@ enum ImageProcessing {
         )
     }
 
+    /// Maps UI fidelity in `1...8` to RGB quantization step size.
+    /// `8 -> 1` (no quantization), `1 -> 128` (very coarse).
+    static func colorQuantizationStep(forFidelity fidelity: Double) -> Int {
+        let clamped = max(1, min(8, Int(fidelity.rounded())))
+        return 1 << (8 - clamped)
+    }
+
+    static func quantizeChannel(_ value: UInt8, step: Int) -> UInt8 {
+        let s = max(1, step)
+        if s == 1 { return value }
+        let bucket = Int(value) / s
+        let center = bucket * s + s / 2
+        return UInt8(min(255, max(0, center)))
+    }
+
+    static func quantizeRGB(_ color: RGBAColor, step: Int) -> RGBAColor {
+        RGBAColor(
+            r: quantizeChannel(color.r, step: step),
+            g: quantizeChannel(color.g, step: step),
+            b: quantizeChannel(color.b, step: step),
+            a: color.a
+        )
+    }
+
+    static func quantizeRGB(_ color: RGBAColor, fidelity: Double) -> RGBAColor {
+        quantizeRGB(color, step: colorQuantizationStep(forFidelity: fidelity))
+    }
+
+    static func quantizeRGB(_ rgb: SIMD3<Float>, step: Int) -> SIMD3<Float> {
+        let c = rgbaColor(from: rgb)
+        let q = quantizeRGB(c, step: step)
+        return SIMD3<Float>(Float(q.r), Float(q.g), Float(q.b))
+    }
+
     /// Mean luminance Y (0…255 scale) over region using target buffer.
     static func meanLuminance(in region: PixelRegion, from buffer: PixelBuffer) -> Double {
         var sumY: Double = 0
@@ -333,10 +389,10 @@ enum ImageProcessing {
         return sumY / Double(n)
     }
 
-    /// Picks a character biased by mean luminance of the **target** region: dark → denser glyphs, light → lighter glyphs.
-    /// Density tiers are recomputed from `characterPool` (tertiles by nominal ink score) so the user’s set drives coverage behavior.
-    static func randomCoverageAwareCharacter(meanLuminanceY: Double, characterPool: [Character]) -> Character {
-        let pool = characterPool.isEmpty ? ["?"] : characterPool
+    /// Picks a stamp biased by mean luminance of the **target** region: dark → denser glyphs, light → lighter glyphs.
+    /// Density tiers are recomputed from `stampPool` (tertiles by nominal ink score) so the user’s set drives coverage behavior.
+    static func randomCoverageAwareStamp(meanLuminanceY: Double, stampPool: [String]) -> String {
+        let pool = stampPool.isEmpty ? ["?"] : stampPool
         let tiers = densityTiers(from: pool)
         let y = meanLuminanceY / 255.0
         let wDense = max(0.05, 1.0 - y)
@@ -444,11 +500,329 @@ enum ImageProcessing {
             + PerceptualScoring.chromaTermWeight * chromaMSE
     }
 
+    // MARK: Edge strength map (precomputed once per target)
+
+    /// Rec. 709 luminance at a pixel; `x`/`y` clamped to the buffer.
+    private static func luminancePixel(buffer: PixelBuffer, x: Int, y: Int) -> Double {
+        let xc = min(buffer.width - 1, max(0, x))
+        let yc = min(buffer.height - 1, max(0, y))
+        let o = yc * buffer.bytesPerRow + xc * buffer.bytesPerPixel
+        let r = Double(buffer.data[o])
+        let g = Double(buffer.data[o + 1])
+        let b = Double(buffer.data[o + 2])
+        return PerceptualScoring.redWeight * r + PerceptualScoring.greenWeight * g + PerceptualScoring.blueWeight * b
+    }
+
+    /// Sobel magnitude on luminance, normalized to 0…1, mild 3×3 box blur, stored in the **red** channel (G/B = 0, A = 255).
+    static func makeEdgeStrengthBuffer(from target: PixelBuffer) -> PixelBuffer {
+        let w = target.width
+        let h = target.height
+        var lum = [Double](repeating: 0, count: w * h)
+        var mag = [Double](repeating: 0, count: w * h)
+        for y in 0..<h {
+            for x in 0..<w {
+                lum[y * w + x] = luminancePixel(buffer: target, x: x, y: y)
+            }
+        }
+        func L(_ x: Int, _ y: Int) -> Double {
+            lum[min(h - 1, max(0, y)) * w + min(w - 1, max(0, x))]
+        }
+        for y in 0..<h {
+            for x in 0..<w {
+                let gx =
+                    -L(x - 1, y - 1) + L(x + 1, y - 1)
+                    + -2 * L(x - 1, y) + 2 * L(x + 1, y)
+                    + -L(x - 1, y + 1) + L(x + 1, y + 1)
+                let gy =
+                    -L(x - 1, y - 1) - 2 * L(x, y - 1) - L(x + 1, y - 1)
+                    + L(x - 1, y + 1) + 2 * L(x, y + 1) + L(x + 1, y + 1)
+                mag[y * w + x] = sqrt(gx * gx + gy * gy)
+            }
+        }
+        var maxM = 1e-9
+        for v in mag { if v > maxM { maxM = v } }
+        var norm = [Double](repeating: 0, count: w * h)
+        for i in 0..<(w * h) {
+            norm[i] = mag[i] / maxM
+        }
+        // Light box blur on normalized magnitudes.
+        var blurred = [Double](repeating: 0, count: w * h)
+        for y in 0..<h {
+            for x in 0..<w {
+                var s = 0.0
+                var c = 0.0
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        let xx = min(w - 1, max(0, x + dx))
+                        let yy = min(h - 1, max(0, y + dy))
+                        s += norm[yy * w + xx]
+                        c += 1
+                    }
+                }
+                blurred[y * w + x] = s / c
+            }
+        }
+        let out = PixelBuffer(width: w, height: h)
+        for y in 0..<h {
+            for x in 0..<w {
+                let e = blurred[y * w + x]
+                let er = UInt8(min(255, max(0, (e * 255.0).rounded())))
+                let o = y * out.bytesPerRow + x * out.bytesPerPixel
+                out.data[o] = er
+                out.data[o + 1] = 0
+                out.data[o + 2] = 0
+                out.data[o + 3] = 255
+            }
+        }
+        return out
+    }
+
+    // MARK: Edge-guided loss (encoding mode `.edges`)
+
+    /// Encourages stamp ink on strong target edges and coverage where edges are strong; primary signal is ink deviation from the canvas background.
+    private static func ink01(r: Double, g: Double, b: Double, background: RGBAColor) -> Double {
+        let br = Double(background.r)
+        let bg = Double(background.g)
+        let bb = Double(background.b)
+        let d = max(abs(r - br), abs(g - bg), abs(b - bb))
+        return min(1, d / 255.0)
+    }
+
+    /// Region-local edge loss for a crop buffer aligned to `region` (same layout as `perceptualError`).
+    static func edgeGuidedLoss(
+        candidate: PixelBuffer,
+        edgeStrength: PixelBuffer,
+        region: PixelRegion,
+        canvasBackground: RGBAColor
+    ) -> Double {
+        precondition(candidate.width == region.width && candidate.height == region.height)
+        precondition(region.x >= 0 && region.y >= 0 && region.x + region.width <= edgeStrength.width && region.y + region.height <= edgeStrength.height)
+
+        var offAcc: Double = 0
+        var missAcc: Double = 0
+        let floorE = EdgeGuidedScoring.edgeStrengthFloor
+        let pixels = Double(max(1, region.width * region.height))
+
+        for row in 0..<region.height {
+            for col in 0..<region.width {
+                let co = row * candidate.bytesPerRow + col * candidate.bytesPerPixel
+                let rc = Double(candidate.data[co])
+                let gc = Double(candidate.data[co + 1])
+                let bc = Double(candidate.data[co + 2])
+                let ink = ink01(r: rc, g: gc, b: bc, background: canvasBackground)
+
+                let to = (region.y + row) * edgeStrength.bytesPerRow + (region.x + col) * edgeStrength.bytesPerPixel
+                let eRaw = Double(edgeStrength.data[to]) / 255.0
+                let e = max(eRaw, floorE)
+
+                offAcc += ink * (1.0 - e)
+                missAcc += e * (1.0 - ink)
+            }
+        }
+
+        let offMean = offAcc / pixels
+        let missMean = missAcc / pixels
+        return EdgeGuidedScoring.lambdaOffEdge * offMean + EdgeGuidedScoring.lambdaMissedEdge * missMean
+    }
+
+    /// Mean edge-guided loss for a subregion of two full same-size buffers (e.g. canvas vs edge map).
+    static func edgeGuidedLossAligned(
+        candidate: PixelBuffer,
+        edgeStrength: PixelBuffer,
+        region: PixelRegion,
+        canvasBackground: RGBAColor
+    ) -> Double {
+        precondition(candidate.width == edgeStrength.width && candidate.height == edgeStrength.height)
+
+        var offAcc: Double = 0
+        var missAcc: Double = 0
+        let floorE = EdgeGuidedScoring.edgeStrengthFloor
+        let pixels = Double(max(1, region.width * region.height))
+
+        for row in 0..<region.height {
+            for col in 0..<region.width {
+                let o = (region.y + row) * candidate.bytesPerRow + (region.x + col) * candidate.bytesPerPixel
+                let rc = Double(candidate.data[o])
+                let gc = Double(candidate.data[o + 1])
+                let bc = Double(candidate.data[o + 2])
+                let ink = ink01(r: rc, g: gc, b: bc, background: canvasBackground)
+
+                let eRaw = Double(edgeStrength.data[o]) / 255.0
+                let e = max(eRaw, floorE)
+
+                offAcc += ink * (1.0 - e)
+                missAcc += e * (1.0 - ink)
+            }
+        }
+
+        let offMean = offAcc / pixels
+        let missMean = missAcc / pixels
+        return EdgeGuidedScoring.lambdaOffEdge * offMean + EdgeGuidedScoring.lambdaMissedEdge * missMean
+    }
+
+    /// Dispatches region loss for candidate scratch vs target (perceptual or edge-guided).
+    static func regionEncodingLoss(
+        mode: EncodingComparisonMode,
+        candidate: PixelBuffer,
+        target: PixelBuffer,
+        edgeStrength: PixelBuffer,
+        region: PixelRegion,
+        canvasBackground: RGBAColor
+    ) -> Double {
+        switch mode {
+        case .perceptual:
+            return perceptualError(candidate: candidate, target: target, region: region)
+        case .edges:
+            return edgeGuidedLoss(
+                candidate: candidate,
+                edgeStrength: edgeStrength,
+                region: region,
+                canvasBackground: canvasBackground
+            )
+        }
+    }
+
+    /// Dispatches aligned region loss for full canvas vs target (perceptual or edge-guided).
+    static func regionEncodingLossAligned(
+        mode: EncodingComparisonMode,
+        candidate: PixelBuffer,
+        target: PixelBuffer,
+        edgeStrength: PixelBuffer,
+        region: PixelRegion,
+        canvasBackground: RGBAColor
+    ) -> Double {
+        switch mode {
+        case .perceptual:
+            return perceptualErrorAligned(candidate: candidate, target: target, region: region)
+        case .edges:
+            return edgeGuidedLossAligned(
+                candidate: candidate,
+                edgeStrength: edgeStrength,
+                region: region,
+                canvasBackground: canvasBackground
+            )
+        }
+    }
+
+    /// Decodes image data to a `CGImage` with EXIF orientation applied to pixel data (upright bitmap).
+    /// Uses `CGImageSourceCreateThumbnailAtIndex` with `kCGImageSourceCreateThumbnailWithTransform` so
+    /// library/file/URL imports match Photos; falls back to raw decode if thumbnail creation fails.
     static func decodeCGImage(data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
             return nil
         }
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
+        func intDimension(_ key: CFString) -> Int {
+            if let v = properties[key] as? Int { return v }
+            if let v = properties[key] as? CGFloat { return Int(v.rounded()) }
+            if let v = properties[key] as? Double { return Int(v.rounded()) }
+            if let n = properties[key] as? NSNumber { return n.intValue }
+            return 0
+        }
+        let width = intDimension(kCGImagePropertyPixelWidth)
+        let height = intDimension(kCGImagePropertyPixelHeight)
+        guard width > 0, height > 0 else {
+            return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        }
+        let maxSide = max(width, height)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxSide,
+        ]
+        if let oriented = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) {
+            return oriented
+        }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    }
+
+    // MARK: - Import adjust (rotate / crop)
+
+    /// Bitmap context with Core Graphics default coordinate system (origin bottom-left, +y up). Used for lossless quarter-turn rotation.
+    nonisolated private static func makeBitmapContextUnflipped(width: Int, height: Int) -> CGContext? {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        return CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        )
+    }
+
+    /// Rotates the image in 90° steps. Positive `quarterTurns` = counterclockwise (same sense as `rotate.left` in Photos).
+    /// Returns `nil` if a new bitmap cannot be allocated.
+    nonisolated static func cgImageRotatedQuarterTurns(_ image: CGImage, quarterTurns: Int) -> CGImage? {
+        let q = ((quarterTurns % 4) + 4) % 4
+        guard q != 0 else { return image }
+        let w = image.width
+        let h = image.height
+        let outW: Int
+        let outH: Int
+        if q == 2 {
+            outW = w
+            outH = h
+        } else {
+            outW = h
+            outH = w
+        }
+        guard let ctx = makeBitmapContextUnflipped(width: outW, height: outH) else { return nil }
+        ctx.interpolationQuality = .high
+        let wf = CGFloat(w)
+        let hf = CGFloat(h)
+        switch q {
+        case 1:
+            // 90° CCW
+            ctx.translateBy(x: 0, y: wf)
+            ctx.rotate(by: -.pi / 2)
+        case 2:
+            ctx.translateBy(x: wf, y: hf)
+            ctx.rotate(by: .pi)
+        case 3:
+            // 90° CW
+            ctx.translateBy(x: hf, y: 0)
+            ctx.rotate(by: .pi / 2)
+        default:
+            break
+        }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: wf, height: hf))
+        return ctx.makeImage()
+    }
+
+    /// Crops using a normalized rectangle in **top-left** image coordinates (matches SwiftUI layout): origin (0,0) is the top-left of the image, y increases downward.
+    nonisolated static func cgImageCroppingNormalizedTopLeft(_ image: CGImage, normalizedRect: CGRect) -> CGImage? {
+        let iw = CGFloat(image.width)
+        let ih = CGFloat(image.height)
+        guard iw >= 1, ih >= 1 else { return nil }
+
+        var nx = max(0, min(1, normalizedRect.origin.x))
+        var ny = max(0, min(1, normalizedRect.origin.y))
+        var nw = max(0, min(1 - nx, normalizedRect.size.width))
+        var nh = max(0, min(1 - ny, normalizedRect.size.height))
+        guard nw > 0, nh > 0 else { return nil }
+
+        // CGImage cropping uses bottom-left origin.
+        var crop = CGRect(
+            x: nx * iw,
+            y: (1.0 - ny - nh) * ih,
+            width: nw * iw,
+            height: nh * ih
+        )
+        crop = crop.integral
+        crop.origin.x = floor(crop.origin.x)
+        crop.origin.y = floor(crop.origin.y)
+        crop.size.width = max(1, ceil(crop.size.width))
+        crop.size.height = max(1, ceil(crop.size.height))
+
+        let bounds = CGRect(x: 0, y: 0, width: iw, height: ih)
+        crop = crop.intersection(bounds)
+        guard crop.width >= 1, crop.height >= 1 else { return nil }
+        return image.cropping(to: crop)
     }
 
     static func downscaledImage(_ image: CGImage, maxDimension: Int) throws -> CGImage {
@@ -557,6 +931,8 @@ enum ImageProcessing {
 
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: 1, y: -1)
+        // CoreText uses `textMatrix` with the CTM; default can mirror glyphs in a flipped bitmap context.
+        context.textMatrix = .identity
         return context
     }
 
@@ -628,6 +1004,7 @@ enum ImageProcessing {
         context.saveGState()
         context.translateBy(x: center.x, y: center.y)
         context.rotate(by: glyph.rotationRadians)
+        context.textMatrix = .identity
         context.textPosition = CGPoint(x: -bounds.midX, y: -bounds.midY)
         CTLineDraw(line, context)
         context.restoreGState()
@@ -663,6 +1040,7 @@ enum ImageProcessing {
         ctx.saveGState()
         ctx.translateBy(x: cx, y: cy)
         ctx.rotate(by: rotationRadians)
+        ctx.textMatrix = .identity
         ctx.textPosition = CGPoint(x: -bounds.midX, y: -bounds.midY)
         CTLineDraw(line, ctx)
         ctx.restoreGState()
@@ -694,7 +1072,8 @@ enum ImageProcessing {
 // MARK: - Glyph render cache
 
 struct GlyphRenderKey: Hashable, Sendable {
-    let character: Character
+    private static let fieldSep = "\u{1E}"
+    let stamp: String
     let quantizedFontSize: CGFloat
     let quantizedRotationDegrees: Int
     let quantizedR: UInt8
@@ -703,7 +1082,7 @@ struct GlyphRenderKey: Hashable, Sendable {
     let isBold: Bool
 
     var nsCacheKey: NSString {
-        "\(character)|\(quantizedFontSize)|\(quantizedRotationDegrees)|\(quantizedR)|\(quantizedG)|\(quantizedB)|\(isBold ? 1 : 0)" as NSString
+        "\(stamp)\(Self.fieldSep)\(quantizedFontSize)\(Self.fieldSep)\(quantizedRotationDegrees)\(Self.fieldSep)\(quantizedR)\(Self.fieldSep)\(quantizedG)\(Self.fieldSep)\(quantizedB)\(Self.fieldSep)\(isBold ? 1 : 0)" as NSString
     }
 
     static func quantizeRGB(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> (UInt8, UInt8, UInt8) {
@@ -711,7 +1090,7 @@ struct GlyphRenderKey: Hashable, Sendable {
     }
 
     init(glyph: GlyphCandidate) {
-        character = glyph.character.first ?? "?"
+        stamp = glyph.character.isEmpty ? "?" : glyph.character
         quantizedFontSize = ImageProcessing.quantizedFontSize(glyph.fontSize)
         quantizedRotationDegrees = ImageProcessing.quantizedRotationDegrees(glyph.rotationRadians)
         let q = Self.quantizeRGB(glyph.color.r, glyph.color.g, glyph.color.b)
@@ -738,7 +1117,7 @@ final class GlyphBitmapCache: @unchecked Sendable {
 // MARK: - PNG export
 
 enum PNGExport {
-    static func data(from cgImage: CGImage) -> Data? {
+    nonisolated static func data(from cgImage: CGImage) -> Data? {
         let data = NSMutableData()
         guard let dest = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else {
             return nil

@@ -145,7 +145,7 @@ struct GlyphCanvasTests {
 
     @Test func fitnessIncreasesWhenPerceptualErrorDecreases() {
         let genome = GlyphGenome(
-            character: "A",
+            stamp: "A",
             fontSize: 10,
             rotationRadians: 0,
             colorR: 120,
@@ -168,6 +168,126 @@ struct GlyphCanvasTests {
             referenceAverageFontSize: 10
         )
         #expect(lo > hi)
+    }
+
+    @Test func edgeGuidedLossAlignedPrefersInkOnStrongEdges() {
+        let n = 16
+        let bg = RGBAColor(r: 240, g: 240, b: 240, a: 255)
+        let region = PixelRegion(x: 0, y: 0, width: n, height: n)
+
+        let edge = PixelBuffer(width: n, height: n)
+        for y in 0..<n {
+            for x in 0..<n {
+                let o = y * edge.bytesPerRow + x * 4
+                let e: UInt8 = (x >= 6 && x <= 9) ? 255 : 0
+                edge.data[o] = e
+                edge.data[o + 1] = 0
+                edge.data[o + 2] = 0
+                edge.data[o + 3] = 255
+            }
+        }
+
+        let onEdge = PixelBuffer(width: n, height: n)
+        for y in 0..<n {
+            for x in 0..<n {
+                let o = y * onEdge.bytesPerRow + x * 4
+                if x >= 6 && x <= 9 {
+                    onEdge.data[o] = 20
+                    onEdge.data[o + 1] = 20
+                    onEdge.data[o + 2] = 20
+                    onEdge.data[o + 3] = 255
+                } else {
+                    onEdge.data[o] = bg.r
+                    onEdge.data[o + 1] = bg.g
+                    onEdge.data[o + 2] = bg.b
+                    onEdge.data[o + 3] = 255
+                }
+            }
+        }
+
+        let offEdge = PixelBuffer(width: n, height: n)
+        for y in 0..<n {
+            for x in 0..<n {
+                let o = y * offEdge.bytesPerRow + x * 4
+                if x <= 3 {
+                    offEdge.data[o] = 20
+                    offEdge.data[o + 1] = 20
+                    offEdge.data[o + 2] = 20
+                    offEdge.data[o + 3] = 255
+                } else {
+                    offEdge.data[o] = bg.r
+                    offEdge.data[o + 1] = bg.g
+                    offEdge.data[o + 2] = bg.b
+                    offEdge.data[o + 3] = 255
+                }
+            }
+        }
+
+        let lossOn = ImageProcessing.edgeGuidedLossAligned(
+            candidate: onEdge,
+            edgeStrength: edge,
+            region: region,
+            canvasBackground: bg
+        )
+        let lossOff = ImageProcessing.edgeGuidedLossAligned(
+            candidate: offEdge,
+            edgeStrength: edge,
+            region: region,
+            canvasBackground: bg
+        )
+        #expect(lossOn < lossOff)
+    }
+
+    @Test func edgeGuidedLossCropMatchesAlignedForFullRegion() {
+        let n = 4
+        let bg = RGBAColor(r: 250, g: 250, b: 250, a: 255)
+        let region = PixelRegion(x: 0, y: 0, width: n, height: n)
+        let edge = PixelBuffer(width: n, height: n)
+        for y in 0..<n {
+            for x in 0..<n {
+                let o = y * edge.bytesPerRow + x * 4
+                edge.data[o] = 0
+                edge.data[o + 1] = 0
+                edge.data[o + 2] = 0
+                edge.data[o + 3] = 255
+            }
+        }
+        let ex = 2
+        let ey = 2
+        let eo = ey * edge.bytesPerRow + ex * 4
+        edge.data[eo] = 200
+        edge.data[eo + 1] = 0
+        edge.data[eo + 2] = 0
+        edge.data[eo + 3] = 255
+
+        let candidate = PixelBuffer(width: n, height: n)
+        for y in 0..<n {
+            for x in 0..<n {
+                let o = y * candidate.bytesPerRow + x * 4
+                candidate.data[o] = bg.r
+                candidate.data[o + 1] = bg.g
+                candidate.data[o + 2] = bg.b
+                candidate.data[o + 3] = 255
+            }
+        }
+        let co = ey * candidate.bytesPerRow + ex * 4
+        candidate.data[co] = 10
+        candidate.data[co + 1] = 10
+        candidate.data[co + 2] = 10
+
+        let aligned = ImageProcessing.edgeGuidedLossAligned(
+            candidate: candidate,
+            edgeStrength: edge,
+            region: region,
+            canvasBackground: bg
+        )
+        let crop = ImageProcessing.edgeGuidedLoss(
+            candidate: candidate,
+            edgeStrength: edge,
+            region: region,
+            canvasBackground: bg
+        )
+        #expect(abs(aligned - crop) < 1e-9)
     }
 
     @Test func urlImportNormalizesBareHostToHTTPS() {
@@ -217,7 +337,7 @@ struct GlyphCanvasTests {
 
     @Test func crossoverIsDeterministicForFixedRNG() {
         let a = GlyphGenome(
-            character: "A",
+            stamp: "A",
             fontSize: 11,
             rotationRadians: 0.2,
             colorR: 10,
@@ -228,7 +348,7 @@ struct GlyphCanvasTests {
             isBold: false
         )
         let b = GlyphGenome(
-            character: "Z",
+            stamp: "Z",
             fontSize: 13,
             rotationRadians: -0.4,
             colorR: 100,
@@ -250,7 +370,8 @@ struct GlyphCanvasTests {
         let manifest = ArtworkManifest(
             canvasWidth: 64,
             canvasHeight: 48,
-            operations: [op]
+            operations: [op],
+            titlePrefix: "Paris — Apr 2024"
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -259,6 +380,7 @@ struct GlyphCanvasTests {
         let decoded = try decoder.decode(ArtworkManifest.self, from: data)
         #expect(decoded == manifest)
         #expect(decoded.operations == [op])
+        #expect(decoded.titlePrefix == "Paris — Apr 2024")
     }
 
     @Test func glyphOperationJSONRoundTrip() throws {
@@ -328,7 +450,7 @@ struct GlyphCanvasTests {
             eliteFraction: 0.3,
             maxEvaluations: 64
         )
-        let pool: [Character] = Array("ABCDEFGH")
+        let pool: [String] = ["A", "B", "C", "D", "E", "F", "G", "H"]
         let result = GlyphEvolutionEngine.evolve(
             config: config,
             seedFromCache: nil,
@@ -336,15 +458,119 @@ struct GlyphCanvasTests {
             meanLuminanceY: 128,
             averageFontSize: 10,
             baseRGB: SIMD3<Float>(128, 128, 128),
-            characterPool: pool,
+            stampPool: pool,
             evaluateFitness: { g in
-                Double(g.character.unicodeScalars.first?.value ?? 0)
+                Double(g.stamp.unicodeScalars.first?.value ?? 0)
             },
             shouldCancel: { false }
         )
         #expect(result.evaluationsUsed == 24)
         #expect(result.generationsRun == 3)
         #expect(result.bestGenome != nil)
+    }
+
+    @Test func colorFidelityMapsToExpectedQuantizationStep() {
+        #expect(ImageProcessing.colorQuantizationStep(forFidelity: 8) == 1)
+        #expect(ImageProcessing.colorQuantizationStep(forFidelity: 7) == 2)
+        #expect(ImageProcessing.colorQuantizationStep(forFidelity: 4) == 16)
+        #expect(ImageProcessing.colorQuantizationStep(forFidelity: 1) == 128)
+    }
+
+    @Test func quantizeRGBUsesBucketCenters() {
+        let inColor = RGBAColor(r: 100, g: 201, b: 3, a: 255)
+        let q = ImageProcessing.quantizeRGB(inColor, step: 64)
+        #expect(q.r == 96)
+        #expect(q.g == 224)
+        #expect(q.b == 32)
+    }
+
+    @Test func glyphGenomeRandomQuantizesChannelsWhenStepIsCoarse() {
+        var rng = LCG64(state: 0x1234ABCD)
+        let g = GlyphGenome.random(
+            region: PixelRegion(x: 0, y: 0, width: 12, height: 12),
+            meanLuminanceY: 120,
+            averageFontSize: 10,
+            baseRGB: SIMD3<Float>(127, 127, 127),
+            colorQuantizationStep: 64,
+            stampPool: ["A", "B", "C"],
+            isBold: false,
+            rng: &rng
+        )
+        #expect(Int(g.colorR.rounded()) % 64 == 32)
+        #expect(Int(g.colorG.rounded()) % 64 == 32)
+        #expect(Int(g.colorB.rounded()) % 64 == 32)
+    }
+
+    @Test func stampSetCharacterModeProducesOrderedUniqueStrings() {
+        let s = StampSetPipeline.filteredOrderedUniqueCharacters(from: "aba", mode: .both)
+        #expect(s == ["a", "b"])
+    }
+
+    @Test func stampSetWordModeKeepsApostropheAndStripsEdgePunctuation() {
+        let text = "  (Hello,)  world…  don't  "
+        let words = StampSetPipeline.filteredOrderedUniqueWords(from: text, mode: .both)
+        #expect(words == ["Hello", "world", "don't"])
+    }
+
+    @Test func stampSetWordModeUppercaseCollapsesDuplicates() {
+        let text = "hello Hello"
+        let words = StampSetPipeline.filteredOrderedUniqueWords(from: text, mode: .uppercase)
+        #expect(words == ["HELLO"])
+    }
+
+    @Test func stampSetActiveSetFallsBackWhenWordInputEmpty() {
+        let active = StampSetPipeline.activeSet(base: "   ", mode: .both, source: .words)
+        #expect(!active.isEmpty)
+    }
+
+    @Test func predefinedStampMergeAppendsMissingOnly() {
+        var base = "AB"
+        PredefinedStampSets.mergeAppendingUnique(into: &base, preset: "BC")
+        #expect(base == "ABC")
+    }
+
+    @Test func importRotationQuarterTurnSwapsDimensions() {
+        let base = Self.solidTestCGImage(width: 20, height: 30)
+        let once = ImageProcessing.cgImageRotatedQuarterTurns(base, quarterTurns: 1)
+        #expect(once?.width == 30)
+        #expect(once?.height == 20)
+        let four = ImageProcessing.cgImageRotatedQuarterTurns(base, quarterTurns: 4)
+        #expect(four?.width == base.width)
+        #expect(four?.height == base.height)
+    }
+
+    @Test func importCropNormalizedTopLeftHalvesDimensions() {
+        let base = Self.solidTestCGImage(width: 100, height: 80)
+        let cropped = ImageProcessing.cgImageCroppingNormalizedTopLeft(
+            base,
+            normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+        )
+        #expect(cropped?.width == 50)
+        #expect(cropped?.height == 40)
+    }
+
+    private static func solidTestCGImage(width: Int, height: Int) -> CGImage {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+        guard
+            let ctx = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            )
+        else {
+            preconditionFailure("CGContext")
+        }
+        ctx.setFillColor(red: 1, green: 0, blue: 0, alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        guard let cg = ctx.makeImage() else {
+            preconditionFailure("CGImage")
+        }
+        return cg
     }
 }
 

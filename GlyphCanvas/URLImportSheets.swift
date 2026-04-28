@@ -6,9 +6,37 @@
 import CoreGraphics
 import SwiftUI
 
-private struct PageURLItem: Identifiable {
+struct PageURLPickItem: Identifiable {
     let url: URL
     var id: String { url.absoluteString }
+}
+
+/// Shared async URL → image / HTML branch used by `URLImportSheet` and `WideStudioEmptyImportView`.
+enum URLImportFlow {
+    enum Step {
+        case decodedImage(CGImage, ImportHints?)
+        case htmlPage(URL)
+        case failed(String)
+    }
+
+    static func load(urlText: String) async -> Step {
+        guard let parsed = URLImageImportHelpers.normalizedHTTPURL(from: urlText) else {
+            return .failed(URLImageImportError.invalidURL.errorDescription ?? "Invalid URL.")
+        }
+        guard URLImageImportHelpers.isAllowedHTTPURL(parsed) else {
+            return .failed(URLImageImportError.notHTTPOrHTTPS.errorDescription ?? "Only http and https URLs are supported.")
+        }
+
+        let outcome = await URLImageImportService.fetchOutcome(from: parsed)
+        switch outcome {
+        case .decodedImage(let cg, let hints):
+            return .decodedImage(cg, hints)
+        case .htmlPage(let pageURL):
+            return .htmlPage(pageURL)
+        case .failed(let err):
+            return .failed(err.localizedDescription)
+        }
+    }
 }
 
 struct URLImportSheet: View {
@@ -17,9 +45,9 @@ struct URLImportSheet: View {
     @State private var urlText = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var pagePickItem: PageURLItem?
+    @State private var pagePickItem: PageURLPickItem?
 
-    let onImagePicked: (CGImage) -> Void
+    let onImagePicked: (CGImage, ImportHints?) -> Void
 
     var body: some View {
         NavigationStack {
@@ -78,8 +106,8 @@ struct URLImportSheet: View {
         .frame(minWidth: 460, idealWidth: 500, minHeight: 240)
 #endif
         .sheet(item: $pagePickItem) { item in
-            PageImagesFromWebSheet(pageURL: item.url) { cgImage in
-                onImagePicked(cgImage)
+            PageImagesFromWebSheet(pageURL: item.url) { cgImage, hints in
+                onImagePicked(cgImage, hints)
                 pagePickItem = nil
                 dismiss()
             }
@@ -88,27 +116,18 @@ struct URLImportSheet: View {
 
     private func load() async {
         errorMessage = nil
-        guard let parsed = URLImageImportHelpers.normalizedHTTPURL(from: urlText) else {
-            errorMessage = URLImageImportError.invalidURL.errorDescription
-            return
-        }
-        guard URLImageImportHelpers.isAllowedHTTPURL(parsed) else {
-            errorMessage = URLImageImportError.notHTTPOrHTTPS.errorDescription
-            return
-        }
-
         isLoading = true
-        let outcome = await URLImageImportService.fetchOutcome(from: parsed)
+        let step = await URLImportFlow.load(urlText: urlText)
         isLoading = false
 
-        switch outcome {
-        case .decodedImage(let cg):
-            onImagePicked(cg)
+        switch step {
+        case .decodedImage(let cg, let hints):
+            onImagePicked(cg, hints)
             dismiss()
         case .htmlPage(let pageURL):
-            pagePickItem = PageURLItem(url: pageURL)
-        case .failed(let err):
-            errorMessage = err.localizedDescription
+            pagePickItem = PageURLPickItem(url: pageURL)
+        case .failed(let message):
+            errorMessage = message
         }
     }
 }
@@ -117,7 +136,7 @@ struct PageImagesFromWebSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let pageURL: URL
-    let onImagePicked: (CGImage) -> Void
+    let onImagePicked: (CGImage, ImportHints?) -> Void
 
     @State private var phase: Phase = .loadingWeb
     @State private var imageURLs: [URL] = []
@@ -245,7 +264,8 @@ struct PageImagesFromWebSheet: View {
                 selectedDownloadError = "Couldn’t decode this image."
                 return
             }
-            onImagePicked(cg)
+            let hints = ImportHints(imageData: data, sourcePageURL: url)
+            onImagePicked(cg, hints)
         case .failure(let err):
             selectedDownloadError = err.localizedDescription
         }

@@ -6,6 +6,21 @@
 import CoreGraphics
 import SwiftUI
 
+// MARK: - Conditional pan (avoid competing with outer ScrollView at 1× zoom)
+
+private struct ConditionalPanGestureModifier<G: Gesture>: ViewModifier {
+    let isActive: Bool
+    let gesture: G
+
+    func body(content: Content) -> some View {
+        if isActive {
+            AnyView(content.simultaneousGesture(gesture))
+        } else {
+            AnyView(content)
+        }
+    }
+}
+
 // MARK: - Mosaic layers (no gestures)
 
 struct StudioMosaicLayers: View {
@@ -65,6 +80,7 @@ struct StudioMosaicInteractiveCanvas: View {
     var body: some View {
         GeometryReader { geo in
             let fitted = fittedContentSize(in: geo.size, image: displayImage, padding: imagePadding)
+            let zoomedForPan = liveScale > 1.02
             ZStack {
                 StudioMosaicLayers(
                     displayImage: displayImage,
@@ -101,7 +117,10 @@ struct StudioMosaicInteractiveCanvas: View {
                 }
             ))
             .simultaneousGesture(magnificationGesture)
-            .simultaneousGesture(dragGesture(container: geo.size, fitted: fitted))
+            .modifier(ConditionalPanGestureModifier(
+                isActive: zoomedForPan,
+                gesture: dragGesture(container: geo.size, fitted: fitted)
+            ))
             .onChange(of: liveScale) { _, newValue in
                 scrollDisabledBinding?.wrappedValue = newValue > 1.02
             }

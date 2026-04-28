@@ -9,11 +9,13 @@ import SwiftUI
 
 struct ProfileView: View {
     @AppStorage(GlyphCanvasStorageKey.baseCharacterSet) private var storedBaseCharacterSet = GlyphCanvasCharacterSetDefaults.baseString
+    @AppStorage(GlyphCanvasStorageKey.stampSourceMode) private var storedStampSourceMode = StampSourceMode.characters.rawValue
     @AppStorage(GlyphCanvasStorageKey.characterCaseMode) private var storedCharacterCaseMode = CharacterCaseMode.both.rawValue
     @AppStorage(GlyphCanvasStorageKey.highDetailMode) private var highDetailMode = true
     @AppStorage(GlyphCanvasStorageKey.autoArchive) private var autoArchive = false
     @AppStorage(GlyphCanvasStorageKey.showSourceOverlay) private var showSourceOverlay = false
     @AppStorage(GlyphCanvasStorageKey.optimizationMode) private var storedOptimizationMode = OptimizationMode.greedy.rawValue
+    @AppStorage(GlyphCanvasStorageKey.encodingComparisonMode) private var storedEncodingComparisonMode = EncodingComparisonMode.perceptual.rawValue
     @AppStorage(GlyphCanvasStorageKey.debugOptimizationOverlay) private var debugOptimizationOverlay = false
 
     @EnvironmentObject private var library: ArtworkLibrary
@@ -63,6 +65,7 @@ struct ProfileView: View {
                         isOn: $showSourceOverlay
                     )
                     optimizationModeCard
+                    encodingComparisonModeCard
                     SettingsToggleRow(
                         title: "Optimization Debug",
                         subtitle: "Shows technical loss and region details while encoding (advanced).",
@@ -105,10 +108,10 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(GalleryTheme.settingsScreenBackground)
-        #if os(macOS)
-        .toolbar(.hidden, for: .windowToolbar)
-        #else
+        #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
+        #else
+        .navigationTitle("")
         #endif
         .alert(alertTitle, isPresented: $showAlert) {
             Button("OK", role: .cancel) {}
@@ -138,6 +141,40 @@ struct ProfileView: View {
         Binding(
             get: { OptimizationMode(rawValue: storedOptimizationMode) ?? .greedy },
             set: { storedOptimizationMode = $0.rawValue }
+        )
+    }
+
+    private var encodingComparisonBinding: Binding<EncodingComparisonMode> {
+        Binding(
+            get: { EncodingComparisonMode(rawValue: storedEncodingComparisonMode) ?? .perceptual },
+            set: { storedEncodingComparisonMode = $0.rawValue }
+        )
+    }
+
+    private var stampSourceSettingsBinding: Binding<StampSourceMode> {
+        Binding(
+            get: { StampSourceMode(rawValue: storedStampSourceMode) ?? .characters },
+            set: { storedStampSourceMode = $0.rawValue }
+        )
+    }
+
+    private var profileStampMode: StampSourceMode {
+        StampSourceMode(rawValue: storedStampSourceMode) ?? .characters
+    }
+
+    private var profileActiveStampCount: Int {
+        StampSetPipeline.activeSet(
+            base: storedBaseCharacterSet,
+            mode: CharacterCaseMode(rawValue: storedCharacterCaseMode) ?? .both,
+            source: profileStampMode
+        ).count
+    }
+
+    private var profileShowsStampFallback: Bool {
+        StampSetPipeline.isEffectivelyEmpty(
+            base: storedBaseCharacterSet,
+            mode: CharacterCaseMode(rawValue: storedCharacterCaseMode) ?? .both,
+            source: profileStampMode
         )
     }
 
@@ -231,23 +268,56 @@ struct ProfileView: View {
     }
 
     private var characterSetCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("CHARACTER SET")
+        VStack(alignment: .leading, spacing: 10) {
+            Text("STAMPS")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(GalleryTheme.bodyMuted)
 
-            TextField("Character set", text: $storedBaseCharacterSet, axis: .vertical)
-                .lineLimit(3...8)
-                #if os(iOS)
-                .textInputAutocapitalization(.never)
-                #endif
-                .autocorrectionDisabled()
-                .padding(10)
-                .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .foregroundStyle(GalleryTheme.headline)
-                .font(.system(.caption, design: .monospaced))
-                .accessibilityLabel("Character set")
-                .accessibilityHint("Characters used when generating the glyph mosaic")
+            Picker("Stamp source", selection: stampSourceSettingsBinding) {
+                Text("Characters").tag(StampSourceMode.characters)
+                Text("Words").tag(StampSourceMode.words)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Stamp source")
+
+            if profileStampMode == .words {
+                Text("Paste text; unique words become stamps. Whitespace splits tokens; edge punctuation is removed; apostrophes inside words are kept.")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(GalleryTheme.bodyMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                TextEditor(text: $storedBaseCharacterSet)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(minHeight: 100)
+                    .padding(8)
+                    .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .foregroundStyle(GalleryTheme.headline)
+                    .accessibilityLabel("Word source text")
+            } else {
+                TextField("Character set", text: $storedBaseCharacterSet, axis: .vertical)
+                    .lineLimit(3...8)
+                    #if os(iOS)
+                    .textInputAutocapitalization(.never)
+                    #endif
+                    .autocorrectionDisabled()
+                    .padding(10)
+                    .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .foregroundStyle(GalleryTheme.headline)
+                    .font(.system(.caption, design: .monospaced))
+                    .accessibilityLabel("Character set")
+                    .accessibilityHint("Characters used when generating the glyph mosaic")
+
+                stampPresetButtons
+            }
+
+            Text("Unique stamps: \(profileActiveStampCount)")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(GalleryTheme.bodyMuted)
+
+            if profileShowsStampFallback {
+                Text("Nothing usable in this input; default character set is used.")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(GalleryTheme.bodyMuted)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -259,6 +329,32 @@ struct ProfileView: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
         )
+    }
+
+    private var stampPresetButtons: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("ADD PRESET")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(GalleryTheme.bodyMuted)
+            HStack(spacing: 8) {
+                stampPresetButton("A–Z", PredefinedStampSets.uppercaseLetters)
+                stampPresetButton("a–z", PredefinedStampSets.lowercaseLetters)
+                stampPresetButton("0–9", PredefinedStampSets.digits)
+            }
+            HStack(spacing: 8) {
+                stampPresetButton("Punct", PredefinedStampSets.punctuation)
+                stampPresetButton("Emoji", PredefinedStampSets.emoji)
+            }
+        }
+    }
+
+    private func stampPresetButton(_ title: String, _ preset: String) -> some View {
+        Button(title) {
+            PredefinedStampSets.mergeAppendingUnique(into: &storedBaseCharacterSet, preset: preset)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(GalleryTheme.settingsAccent)
     }
 
     private var caseFilterCard: some View {
@@ -301,6 +397,37 @@ struct ProfileView: View {
             .pickerStyle(.segmented)
             .accessibilityLabel("Optimization mode")
             .accessibilityHint("Greedy is faster per step; genetic searches more broadly in each region")
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(GalleryTheme.settingsCardSurface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
+        )
+    }
+
+    private var encodingComparisonModeCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ENCODING COMPARISON")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(GalleryTheme.bodyMuted)
+
+            Picker("Encoding comparison", selection: encodingComparisonBinding) {
+                Text("Match").tag(EncodingComparisonMode.perceptual)
+                Text("Edges").tag(EncodingComparisonMode.edges)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Encoding comparison")
+            .accessibilityHint("Match follows color like the source; Edges prefers stamp ink along strong edges")
+
+            Text("Edges mode places ink along outlines instead of matching interior color.")
+                .font(.caption2)
+                .foregroundStyle(GalleryTheme.bodyMuted)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -473,6 +600,7 @@ struct ProfileView: View {
             autoArchive = false
             showSourceOverlay = false
             storedOptimizationMode = OptimizationMode.greedy.rawValue
+            storedEncodingComparisonMode = EncodingComparisonMode.perceptual.rawValue
             debugOptimizationOverlay = false
             alertTitle = "Data removed"
             alertMessage = "Local gallery and GlyphCanvas settings were cleared."

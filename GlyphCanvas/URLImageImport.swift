@@ -33,7 +33,8 @@ enum URLImageImportError: LocalizedError, Equatable {
 }
 
 enum URLImageFetchOutcome {
-    case decodedImage(CGImage)
+    /// Decoded bitmap, optional import hints (image bytes + page URL for titles).
+    case decodedImage(CGImage, ImportHints?)
     case htmlPage(URL)
     case failed(URLImageImportError)
 }
@@ -108,7 +109,8 @@ enum URLImageImportService {
             }
             let finalURL = http.url ?? url
             if let image = ImageProcessing.decodeCGImage(data: data) {
-                return .decodedImage(image)
+                let hints = ImportHints(imageData: data, sourcePageURL: finalURL)
+                return .decodedImage(image, hints)
             }
             let mime = http.value(forHTTPHeaderField: "Content-Type")?.lowercased() ?? ""
             if mime.contains("text/html") || URLImageImportHelpers.sniffsHTML(data) {

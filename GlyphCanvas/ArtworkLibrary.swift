@@ -85,16 +85,34 @@ final class ArtworkLibrary: ObservableObject {
         }
         let data = try Data(contentsOf: indexURL)
         let file = try decoder.decode(ArtworkIndexFile.self, from: data)
-        entries = file.entries.sorted { $0.createdAt > $1.createdAt }
+        entries = Self.sortedGalleryEntries(file.entries)
+    }
+
+    /// Favorites first (by `favoritedAt`, then `createdAt`), then others by `createdAt` (newest first).
+    static func sortedGalleryEntries(_ list: [ArtworkIndexEntry]) -> [ArtworkIndexEntry] {
+        list.sorted { a, b in
+            if a.isFavorite != b.isFavorite {
+                return a.isFavorite && !b.isFavorite
+            }
+            if a.isFavorite {
+                let ad = a.favoritedAt ?? a.createdAt
+                let bd = b.favoritedAt ?? b.createdAt
+                return ad > bd
+            }
+            return a.createdAt > b.createdAt
+        }
     }
 
     /// Writes manifest, PNGs, and updates the index. Returns the artwork id.
     /// Pass `existingArtworkID` to update the same gallery row; `createdAt` is preserved when a manifest already exists on disk.
+    /// Pass `bumpCreatedAt` to set `createdAt` to now (e.g. when archiving before a new studio session so the grid sorts newest first).
     func saveArtwork(
         source: CGImage,
         preview: CGImage,
         operations: [GlyphOperation],
-        existingArtworkID: UUID? = nil
+        existingArtworkID: UUID? = nil,
+        bumpCreatedAt: Bool = false,
+        titlePrefix: String? = nil
     ) throws -> UUID {
         try FileManager.default.createDirectory(at: Self.artworksRootURL, withIntermediateDirectories: true)
 
@@ -106,21 +124,31 @@ final class ArtworkLibrary: ObservableObject {
 
         let id = existingArtworkID ?? UUID()
         let manifestFileURL = manifestURL(for: id)
+        let existingManifest: ArtworkManifest? = {
+            guard FileManager.default.fileExists(atPath: manifestFileURL.path),
+                  let data = try? Data(contentsOf: manifestFileURL),
+                  let m = try? decoder.decode(ArtworkManifest.self, from: data),
+                  m.id == id else { return nil }
+            return m
+        }()
         let createdAt: Date
-        if FileManager.default.fileExists(atPath: manifestFileURL.path),
-           let existing = try? decoder.decode(ArtworkManifest.self, from: Data(contentsOf: manifestFileURL)),
-           existing.id == id {
+        if bumpCreatedAt {
+            createdAt = Date()
+        } else if let existing = existingManifest {
             createdAt = existing.createdAt
         } else {
             createdAt = Date()
         }
+
+        let mergedTitlePrefix = titlePrefix ?? existingManifest?.titlePrefix
 
         let manifest = ArtworkManifest(
             id: id,
             createdAt: createdAt,
             canvasWidth: w,
             canvasHeight: h,
-            operations: operations
+            operations: operations,
+            titlePrefix: mergedTitlePrefix
         )
         let dir = directoryURL(for: id)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -145,8 +173,13 @@ final class ArtworkLibrary: ObservableObject {
         try thumbData.write(to: thumbURL(for: id), options: [.atomic])
 
         var next = entries.filter { $0.id != id }
-        next.append(ArtworkIndexEntry(from: manifest))
-        entries = next.sorted { $0.createdAt > $1.createdAt }
+        var row = ArtworkIndexEntry(from: manifest)
+        if let previous = entries.first(where: { $0.id == id }) {
+            row.isFavorite = previous.isFavorite
+            row.favoritedAt = previous.favoritedAt
+        }
+        next.append(row)
+        entries = Self.sortedGalleryEntries(next)
         try persistIndex()
         return id
     }
@@ -163,6 +196,22 @@ final class ArtworkLibrary: ObservableObject {
         return m
     }
 
+    /// Updates the human title prefix (e.g. after async reverse geocoding) and refreshes the gallery index.
+    func updateTitlePrefix(id: UUID, titlePrefix: String) throws {
+        var manifest = try loadManifest(id: id)
+        manifest.titlePrefix = titlePrefix
+        let manifestData = try encoder.encode(manifest)
+        try manifestData.write(to: manifestURL(for: id), options: [.atomic])
+        var next = entries
+        guard let idx = next.firstIndex(where: { $0.id == id }) else {
+            try reloadFromDisk()
+            return
+        }
+        next[idx].titlePrefix = titlePrefix
+        entries = Self.sortedGalleryEntries(next)
+        try persistIndex()
+    }
+
     func loadSourceImage(id: UUID) throws -> CGImage {
         let data = try Data(contentsOf: sourceURL(for: id))
         guard let img = ImageProcessing.decodeCGImage(data: data) else {
@@ -177,6 +226,22 @@ final class ArtworkLibrary: ObservableObject {
             try FileManager.default.removeItem(at: dir)
         }
         entries.removeAll { $0.id == id }
+        try persistIndex()
+    }
+
+    func toggleFavorite(id: UUID) throws {
+        guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
+        var e = entries[idx]
+        if e.isFavorite {
+            e.isFavorite = false
+            e.favoritedAt = nil
+        } else {
+            e.isFavorite = true
+            e.favoritedAt = Date()
+        }
+        var next = entries
+        next[idx] = e
+        entries = Self.sortedGalleryEntries(next)
         try persistIndex()
     }
 

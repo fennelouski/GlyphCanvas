@@ -34,7 +34,7 @@ struct GlyphOperation: Sendable, Codable {
         )
     }
 
-    init(
+    nonisolated init(
         character: String,
         position: CGPoint,
         fontSize: CGFloat,
@@ -58,7 +58,7 @@ struct GlyphOperation: Sendable, Codable {
         self.isBold = isBold
     }
 
-    init(from candidate: GlyphCandidate, sequenceIndex: Int) {
+    nonisolated init(from candidate: GlyphCandidate, sequenceIndex: Int) {
         let center = CGPoint(
             x: CGFloat(candidate.region.x) + CGFloat(candidate.region.width) / 2.0 + candidate.centerOffsetX,
             y: CGFloat(candidate.region.y) + CGFloat(candidate.region.height) / 2.0 + candidate.centerOffsetY

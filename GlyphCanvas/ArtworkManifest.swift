@@ -16,6 +16,8 @@ struct ArtworkManifest: Sendable {
     var canvasWidth: Int
     var canvasHeight: Int
     var operations: [GlyphOperation]
+    /// Human context for gallery titles (date, place, etc.); uniqueness is added in code via `GalleryArchiveNaming`.
+    var titlePrefix: String?
 
     init(
         id: UUID = UUID(),
@@ -23,7 +25,8 @@ struct ArtworkManifest: Sendable {
         formatVersion: Int = Self.currentVersion,
         canvasWidth: Int,
         canvasHeight: Int,
-        operations: [GlyphOperation]
+        operations: [GlyphOperation],
+        titlePrefix: String? = nil
     ) {
         self.id = id
         self.createdAt = createdAt
@@ -31,6 +34,7 @@ struct ArtworkManifest: Sendable {
         self.canvasWidth = canvasWidth
         self.canvasHeight = canvasHeight
         self.operations = operations
+        self.titlePrefix = titlePrefix
     }
 }
 
@@ -41,13 +45,14 @@ extension ArtworkManifest: Equatable {
             lhs.formatVersion == rhs.formatVersion &&
             lhs.canvasWidth == rhs.canvasWidth &&
             lhs.canvasHeight == rhs.canvasHeight &&
-            lhs.operations == rhs.operations
+            lhs.operations == rhs.operations &&
+            lhs.titlePrefix == rhs.titlePrefix
     }
 }
 
 extension ArtworkManifest: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, createdAt, formatVersion, canvasWidth, canvasHeight, operations
+        case id, createdAt, formatVersion, canvasWidth, canvasHeight, operations, titlePrefix
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -58,6 +63,7 @@ extension ArtworkManifest: Codable {
         canvasWidth = try c.decode(Int.self, forKey: .canvasWidth)
         canvasHeight = try c.decode(Int.self, forKey: .canvasHeight)
         operations = try c.decode([GlyphOperation].self, forKey: .operations)
+        titlePrefix = try c.decodeIfPresent(String.self, forKey: .titlePrefix)
     }
 
     nonisolated func encode(to encoder: Encoder) throws {
@@ -68,6 +74,7 @@ extension ArtworkManifest: Codable {
         try c.encode(canvasWidth, forKey: .canvasWidth)
         try c.encode(canvasHeight, forKey: .canvasHeight)
         try c.encode(operations, forKey: .operations)
+        try c.encodeIfPresent(titlePrefix, forKey: .titlePrefix)
     }
 }
 
@@ -79,17 +86,33 @@ struct ArtworkIndexEntry: Codable, Equatable, Identifiable, Sendable {
     var canvasHeight: Int
     /// Stored glyph count at last save (omitted in older index files → decoded as `0`).
     var glyphCount: Int
+    var isFavorite: Bool
+    var favoritedAt: Date?
+    /// Mirrors `ArtworkManifest.titlePrefix` for gallery display without loading full manifests.
+    var titlePrefix: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, createdAt, canvasWidth, canvasHeight, glyphCount
+        case id, createdAt, canvasWidth, canvasHeight, glyphCount, isFavorite, favoritedAt, titlePrefix
     }
 
-    init(id: UUID, createdAt: Date, canvasWidth: Int, canvasHeight: Int, glyphCount: Int = 0) {
+    init(
+        id: UUID,
+        createdAt: Date,
+        canvasWidth: Int,
+        canvasHeight: Int,
+        glyphCount: Int = 0,
+        isFavorite: Bool = false,
+        favoritedAt: Date? = nil,
+        titlePrefix: String? = nil
+    ) {
         self.id = id
         self.createdAt = createdAt
         self.canvasWidth = canvasWidth
         self.canvasHeight = canvasHeight
         self.glyphCount = glyphCount
+        self.isFavorite = isFavorite
+        self.favoritedAt = favoritedAt
+        self.titlePrefix = titlePrefix
     }
 
     init(from manifest: ArtworkManifest) {
@@ -98,6 +121,9 @@ struct ArtworkIndexEntry: Codable, Equatable, Identifiable, Sendable {
         self.canvasWidth = manifest.canvasWidth
         self.canvasHeight = manifest.canvasHeight
         self.glyphCount = manifest.operations.count
+        self.isFavorite = false
+        self.favoritedAt = nil
+        self.titlePrefix = manifest.titlePrefix
     }
 
     init(from decoder: Decoder) throws {
@@ -107,6 +133,9 @@ struct ArtworkIndexEntry: Codable, Equatable, Identifiable, Sendable {
         canvasWidth = try c.decode(Int.self, forKey: .canvasWidth)
         canvasHeight = try c.decode(Int.self, forKey: .canvasHeight)
         glyphCount = try c.decodeIfPresent(Int.self, forKey: .glyphCount) ?? 0
+        isFavorite = try c.decodeIfPresent(Bool.self, forKey: .isFavorite) ?? false
+        favoritedAt = try c.decodeIfPresent(Date.self, forKey: .favoritedAt)
+        titlePrefix = try c.decodeIfPresent(String.self, forKey: .titlePrefix)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -116,6 +145,9 @@ struct ArtworkIndexEntry: Codable, Equatable, Identifiable, Sendable {
         try c.encode(canvasWidth, forKey: .canvasWidth)
         try c.encode(canvasHeight, forKey: .canvasHeight)
         try c.encode(glyphCount, forKey: .glyphCount)
+        try c.encode(isFavorite, forKey: .isFavorite)
+        try c.encodeIfPresent(favoritedAt, forKey: .favoritedAt)
+        try c.encodeIfPresent(titlePrefix, forKey: .titlePrefix)
     }
 }
 

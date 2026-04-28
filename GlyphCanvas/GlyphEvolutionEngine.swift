@@ -12,6 +12,19 @@ enum OptimizationMode: String, CaseIterable, Sendable {
     case genetic
 }
 
+/// How candidate stamps are scored against the source: full perceptual RGB match vs edge-aligned ink placement.
+enum EncodingComparisonMode: String, CaseIterable, Sendable {
+    case perceptual
+    case edges
+
+    var displayLabel: String {
+        switch self {
+        case .perceptual: "Match"
+        case .edges: "Edges"
+        }
+    }
+}
+
 struct GeneticEvolutionConfig: Sendable {
     var populationSize: Int
     var generations: Int
@@ -47,7 +60,8 @@ enum GlyphEvolutionEngine {
         meanLuminanceY: Double,
         averageFontSize: CGFloat,
         baseRGB: SIMD3<Float>,
-        characterPool: [Character],
+        colorQuantizationStep: Int = 1,
+        stampPool: [String],
         stampIsBold: Bool = false,
         evaluateFitness: (GlyphGenome) -> Double?,
         shouldCancel: () -> Bool
@@ -71,7 +85,8 @@ enum GlyphEvolutionEngine {
                 meanLuminanceY: meanLuminanceY,
                 averageFontSize: averageFontSize,
                 baseRGB: baseRGB,
-                characterPool: characterPool,
+                colorQuantizationStep: colorQuantizationStep,
+                stampPool: stampPool,
                 isBold: stampIsBold,
                 rng: &rng
             )
@@ -87,7 +102,8 @@ enum GlyphEvolutionEngine {
                     meanLuminanceY: meanLuminanceY,
                     averageFontSize: averageFontSize,
                     baseRGB: baseRGB,
-                    characterPool: characterPool,
+                    colorQuantizationStep: colorQuantizationStep,
+                    stampPool: stampPool,
                     stampIsBold: stampIsBold,
                     rng: &rng
                 )
@@ -162,14 +178,15 @@ enum GlyphEvolutionEngine {
                 }
                 let p1 = elite.randomElement(using: &rng) ?? elite[0]
                 let p2 = elite.randomElement(using: &rng) ?? elite[0]
-                var child = GlyphGenome.crossover(p1, p2, rng: &rng)
+                var child = GlyphGenome.crossover(p1, p2, colorQuantizationStep: colorQuantizationStep, rng: &rng)
                 child.isBold = stampIsBold
                 child.mutate(
                     region: region,
                     meanLuminanceY: meanLuminanceY,
                     averageFontSize: averageFontSize,
                     baseRGB: baseRGB,
-                    characterPool: characterPool,
+                    colorQuantizationStep: colorQuantizationStep,
+                    stampPool: stampPool,
                     stampIsBold: stampIsBold,
                     rng: &rng
                 )

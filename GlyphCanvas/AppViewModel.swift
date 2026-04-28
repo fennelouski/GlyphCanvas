@@ -10,9 +10,6 @@ import CoreGraphics
 import Foundation
 import simd
 
-#if os(iOS)
-import Photos
-#endif
 #if os(macOS)
 import AppKit
 import UniformTypeIdentifiers
@@ -49,6 +46,9 @@ final class AppViewModel: ObservableObject {
     @Published var averageFontSize: Double = 10
 
     @Published var optimizationMode: OptimizationMode = .greedy
+    @Published var encodingComparisonMode: EncodingComparisonMode = .perceptual
+    /// 1...8 where 8 keeps near-original color fidelity (minimal quantization).
+    @Published var colorFidelity: Double = 8
     /// Genetic mode: population size (12…24).
     @Published var geneticPopulation: Double = 16
     /// Genetic mode: generations per region (5…15), capped by max evaluations.
@@ -74,24 +74,35 @@ final class AppViewModel: ObservableObject {
     /// Gallery row id for this studio session; cleared on new source image, set when restoring from gallery or after first save.
     private(set) var activeArtworkID: UUID?
 
+    /// Human-readable title prefix from import metadata (date, place); combined with `GalleryArchiveNaming` on save.
+    private(set) var pendingImportTitlePrefix: String?
+
+    /// Set from `EditorView` so encoding can archive to the shared `ArtworkLibrary` without reaching for environment objects.
+    var galleryLibrary: ArtworkLibrary?
+
     /// User-editable pool; persisted via `@AppStorage` in `ContentView` (keys in `GlyphCanvasStorageKey`).
     @Published var baseCharacterSet: String = GlyphCanvasCharacterSetDefaults.baseString
+    @Published var stampSourceMode: StampSourceMode = .characters
     @Published var characterCaseMode: CharacterCaseMode = .both
 
-    /// Filtered, de-duplicated characters used for glyph sampling. Non-letters are never removed by case mode
-    /// (digits and punctuation stay available in every mode); only alphabetic characters are filtered by
-    /// `characterCaseMode`. Leading/trailing whitespace/newlines are ignored when building the set; internal
-    /// spaces are kept. Empty or all-filtered input falls back to `GlyphCanvasCharacterSetDefaults.baseString`,
-    /// then `["?"]`.
-    var activeCharacterSet: [Character] {
-        CharacterSetPipeline.activeSet(base: baseCharacterSet, mode: characterCaseMode)
+    /// Filtered, de-duplicated stamps (single characters, emoji, or words) used for glyph sampling.
+    /// Character mode: letters filtered by `characterCaseMode`; non-letters kept; internal spaces kept.
+    /// Word mode: unique words from pasted text (see `StampSetPipeline`). Empty input falls back to defaults.
+    var activeStamps: [String] {
+        StampSetPipeline.activeSet(
+            base: baseCharacterSet,
+            mode: characterCaseMode,
+            source: stampSourceMode
+        )
     }
 
-    /// Shown when trimmed input is empty or case filtering would yield no characters (before fallback).
+    /// Shown when user input would yield no stamps before fallback to defaults.
     var showsCharacterSetFallbackNotice: Bool {
-        let trimmed = baseCharacterSet.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return true }
-        return CharacterSetPipeline.filteredOrderedUnique(from: baseCharacterSet, mode: characterCaseMode).isEmpty
+        StampSetPipeline.isEffectivelyEmpty(
+            base: baseCharacterSet,
+            mode: characterCaseMode,
+            source: stampSourceMode
+        )
     }
 
     var hasLoadedImage: Bool { engine != nil }
@@ -100,11 +111,16 @@ final class AppViewModel: ObservableObject {
     fileprivate var optimizationTask: Task<Void, Never>?
     fileprivate let historyStore = GlyphHistoryStore()
     fileprivate var playbackTask: Task<Void, Never>?
+    /// When true, timeline playback wraps from the end back to the start (gallery fullscreen).
+    fileprivate var playbackLoops = false
 
     fileprivate var scoreEMA: Double?
     fileprivate var referenceError: Double?
     /// After the user stops encoding via the Studio Stop control, skip auto-start until they press Play or load/reset.
     fileprivate var encodingAutostartSuppressed = false
+
+    private var importTitleRefinementGeneration: UInt = 0
+    private var importGeocodeTask: Task<Void, Never>?
 }
 
 extension AppViewModel {
@@ -117,6 +133,7 @@ extension AppViewModel {
         geneticPopulation = 16
         geneticGenerations = 8
         geneticMaxEvaluations = 128
+        colorFidelity = 8
     }
 
     /// Applies standard vs high-detail engine presets from `UserDefaults` (see `GlyphCanvasStorageKey`).
@@ -135,7 +152,30 @@ extension AppViewModel {
         }
     }
 
-    func loadImage(_ image: CGImage) {
+    func loadImage(_ image: CGImage, hints: ImportHints? = nil) {
+        importGeocodeTask?.cancel()
+        importGeocodeTask = nil
+        importTitleRefinementGeneration += 1
+        let refinementGen = importTitleRefinementGeneration
+        let titleSnapshot = ImportTitleBuilder.provisionalPrefixAndLocation(hints: hints)
+        pendingImportTitlePrefix = titleSnapshot.prefix
+
+        if let loc = titleSnapshot.location {
+            let capDate = titleSnapshot.captureDate
+            importGeocodeTask = Task { [weak self] in
+                guard let place = await ImportGeocoding.placeLabel(for: loc) else { return }
+                let merged = ImportTitleBuilder.prefix(placeName: place, captureDate: capDate) ?? place
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    guard refinementGen == self.importTitleRefinementGeneration else { return }
+                    self.pendingImportTitlePrefix = merged
+                    if let aid = self.activeArtworkID, let lib = self.galleryLibrary {
+                        try? lib.updateTitlePrefix(id: aid, titlePrefix: merged)
+                    }
+                }
+            }
+        }
+
         Task {
             await pauseAndAwaitTask()
             do {
@@ -144,7 +184,12 @@ extension AppViewModel {
                     (try? ImageProcessing.darkestAmongTopFiveCommonColors(from: downscaled))
                     ?? RGBAColor(r: 255, g: 255, b: 255, a: 255)
                 try await historyStore.reset(width: downscaled.width, height: downscaled.height, canvasBackground: canvasBG)
-                let engine = try GlyphRenderEngine(target: downscaled, canvasBackground: canvasBG)
+                let encMode = await MainActor.run { self.encodingComparisonMode }
+                let engine = try GlyphRenderEngine(
+                    target: downscaled,
+                    canvasBackground: canvasBG,
+                    initialEncodingComparisonMode: encMode
+                )
                 let snapshot = try engine.snapshot()
                 await MainActor.run {
                     self.sourceImageForOverlay = downscaled
@@ -178,6 +223,7 @@ extension AppViewModel {
                     self.glyphHistory = []
                     self.playbackIndex = 0
                     self.activeArtworkID = nil
+                    self.pendingImportTitlePrefix = nil
                 }
             }
         }
@@ -186,6 +232,14 @@ extension AppViewModel {
     func start() {
         guard !isRunning, engine != nil, playbackIndex == glyphHistory.count else { return }
         encodingAutostartSuppressed = false
+        if let library = galleryLibrary {
+            performPersistArtworkToLibrary(
+                library: library,
+                userInitiated: false,
+                bumpCreatedAt: false,
+                successMessage: nil
+            )
+        }
         isRunning = true
         optimizationTask = Task.detached(priority: .userInitiated) { [weak self] in
             await runGlyphOptimizationLoop(weakViewModel: self)
@@ -229,7 +283,12 @@ extension AppViewModel {
                     ?? RGBAColor(r: 255, g: 255, b: 255, a: 255)
                 try await historyStore.reset(width: src.width, height: src.height, canvasBackground: canvasBG)
                 await MainActor.run {
-                    guard let engine = try? GlyphRenderEngine(target: src, canvasBackground: canvasBG),
+                    let encMode = self.encodingComparisonMode
+                    guard let engine = try? GlyphRenderEngine(
+                        target: src,
+                        canvasBackground: canvasBG,
+                        initialEncodingComparisonMode: encMode
+                    ),
                           let snap = try? engine.snapshot() else {
                         self.engine = nil
                         self.displayImage = nil
@@ -268,8 +327,32 @@ extension AppViewModel {
     }
 
     /// Writes the current canvas to disk; updates `activeArtworkID`. Silent failures when `userInitiated` is false (e.g. playback auto-archive).
-    func persistArtworkToLibrary(library: ArtworkLibrary, userInitiated: Bool) async {
-        await pauseAndAwaitTask()
+    /// When `pauseOptimizationFirst` is false, the optimization loop is left running (e.g. save at `start()` before the detached task runs).
+    func persistArtworkToLibrary(
+        library: ArtworkLibrary,
+        userInitiated: Bool,
+        bumpCreatedAt: Bool = false,
+        successMessage: String? = nil,
+        pauseOptimizationFirst: Bool = true
+    ) async {
+        if pauseOptimizationFirst {
+            await pauseAndAwaitTask()
+        }
+        performPersistArtworkToLibrary(
+            library: library,
+            userInitiated: userInitiated,
+            bumpCreatedAt: bumpCreatedAt,
+            successMessage: successMessage
+        )
+    }
+
+    /// Main-actor snapshot write used by `persistArtworkToLibrary` and `start()` (without pausing the optimizer).
+    private func performPersistArtworkToLibrary(
+        library: ArtworkLibrary,
+        userInitiated: Bool,
+        bumpCreatedAt: Bool,
+        successMessage: String?
+    ) {
         guard let source = sourceImageForOverlay else {
             if userInitiated { exportMessage = "No source image to save." }
             return
@@ -285,22 +368,57 @@ extension AppViewModel {
             return
         }
         let ops = glyphHistory
+        let messageOnSuccess = successMessage ?? "Saved to gallery."
         do {
             let id = try library.saveArtwork(
                 source: source,
                 preview: preview,
                 operations: ops,
-                existingArtworkID: activeArtworkID
+                existingArtworkID: activeArtworkID,
+                bumpCreatedAt: bumpCreatedAt,
+                titlePrefix: pendingImportTitlePrefix
             )
             activeArtworkID = id
             if userInitiated {
-                exportMessage = "Saved to gallery."
+                exportMessage = messageOnSuccess
             }
         } catch {
             if userInitiated {
                 exportMessage = "Save failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Archives the current canvas when starting a new image from the gallery, then clears the studio session.
+    func beginNewImageSession(library: ArtworkLibrary) async {
+        await pauseAndAwaitTask()
+        if sourceImageForOverlay != nil {
+            await persistArtworkToLibrary(
+                library: library,
+                userInitiated: true,
+                bumpCreatedAt: true,
+                successMessage: "Previous artwork saved to gallery."
+            )
+        }
+        sourceImageForOverlay = nil
+        engine = nil
+        displayImage = nil
+        iterationCount = 0
+        glyphCount = 0
+        glyphHistory = []
+        playbackIndex = 0
+        isPlayingBack = false
+        isStopped = false
+        playbackTask?.cancel()
+        playbackTask = nil
+        scoreEMA = nil
+        referenceError = nil
+        progressEstimate = 0
+        measuredIterationsPerSecond = 0
+        clearOptimizationDebug()
+        activeArtworkID = nil
+        encodingAutostartSuppressed = false
+        pendingImportTitlePrefix = nil
     }
 
     /// Rebuilds engine and history from a saved gallery document.
@@ -322,8 +440,12 @@ extension AppViewModel {
                 height: manifest.canvasHeight,
                 canvasBackground: canvasBG
             )
-            let engine = try GlyphRenderEngine(target: source, canvasBackground: canvasBG)
-            engine.rebuildCanvas(from: manifest.operations)
+            let engine = try GlyphRenderEngine(
+                target: source,
+                canvasBackground: canvasBG,
+                initialEncodingComparisonMode: encodingComparisonMode
+            )
+            engine.rebuildCanvas(from: manifest.operations, encodingComparisonMode: encodingComparisonMode)
             let snapshot = try engine.snapshot()
             sourceImageForOverlay = source
             self.engine = engine
@@ -344,6 +466,7 @@ extension AppViewModel {
             clearOptimizationDebug()
             exportMessage = nil
             activeArtworkID = manifest.id
+            pendingImportTitlePrefix = manifest.titlePrefix
             applyStudioPresetFromSettings()
         } catch {
             exportMessage = "Could not open artwork: \(error.localizedDescription)"
@@ -354,6 +477,7 @@ extension AppViewModel {
             glyphCount = 0
             playbackIndex = 0
             activeArtworkID = nil
+            pendingImportTitlePrefix = nil
         }
     }
 
@@ -364,6 +488,13 @@ extension AppViewModel {
         debugLastGeneration = nil
         debugLastEvaluations = nil
         debugLastRegion = nil
+    }
+
+    /// Keeps per-cell region weights in sync when switching encoding mode; resets progress smoothing (different loss scale).
+    func syncEncodingComparisonModeToEngine() {
+        engine?.setEncodingComparisonMode(encodingComparisonMode)
+        referenceError = nil
+        scoreEMA = nil
     }
 
     /// Updates `displayImage` from the engine snapshot (live) or history replay (scrub/playback).
@@ -386,6 +517,7 @@ extension AppViewModel {
         let capped = max(0, min(index, glyphHistory.count))
         playbackIndex = capped
         isPlayingBack = false
+        playbackLoops = false
         playbackTask?.cancel()
         playbackTask = nil
         Task { await refreshTimelineDisplay() }
@@ -394,6 +526,15 @@ extension AppViewModel {
     func stopTimeline() {
         isStopped = true
         isPlayingBack = false
+        playbackLoops = false
+        playbackTask?.cancel()
+        playbackTask = nil
+    }
+
+    /// Stops gallery fullscreen loop playback without toggling encoding `isStopped` (standalone playback VM).
+    func endGalleryLoopPlaybackSession() {
+        isPlayingBack = false
+        playbackLoops = false
         playbackTask?.cancel()
         playbackTask = nil
     }
@@ -401,11 +542,32 @@ extension AppViewModel {
     func togglePlayback(library: ArtworkLibrary) {
         if isPlayingBack {
             isPlayingBack = false
+            playbackLoops = false
             playbackTask?.cancel()
             playbackTask = nil
             return
         }
         guard !glyphHistory.isEmpty else { return }
+        Task {
+            await persistArtworkToLibrary(library: library, userInitiated: false)
+            await MainActor.run {
+                self.playbackLoops = false
+                if self.playbackIndex >= self.glyphHistory.count {
+                    self.playbackIndex = 0
+                }
+                self.isPlayingBack = true
+                self.playbackTask = Task { await self.runPlaybackLoop() }
+            }
+        }
+    }
+
+    /// Looping playback for gallery fullscreen (does not toggle off studio timeline behavior elsewhere).
+    func startLoopingPlayback(library: ArtworkLibrary) {
+        guard !glyphHistory.isEmpty else { return }
+        playbackLoops = true
+        isPlayingBack = false
+        playbackTask?.cancel()
+        playbackTask = nil
         Task {
             await persistArtworkToLibrary(library: library, userInitiated: false)
             await MainActor.run {
@@ -432,7 +594,11 @@ extension AppViewModel {
                 }
                 self.playbackIndex += 1
                 if self.playbackIndex >= self.glyphHistory.count {
-                    self.isPlayingBack = false
+                    if self.playbackLoops {
+                        self.playbackIndex = 0
+                    } else {
+                        self.isPlayingBack = false
+                    }
                 }
                 return false
             }
@@ -442,6 +608,28 @@ extension AppViewModel {
         await MainActor.run {
             self.playbackTask = nil
             Task { await self.refreshTimelineDisplay() }
+        }
+    }
+
+    /// Pauses looping gallery playback without clearing the loop intent (used by gallery fullscreen).
+    func pauseGalleryLoopPlayback() {
+        isPlayingBack = false
+        playbackTask?.cancel()
+        playbackTask = nil
+    }
+
+    /// Resumes gallery looping playback after `pauseGalleryLoopPlayback`.
+    func resumeGalleryLoopPlayback(library: ArtworkLibrary) {
+        guard playbackLoops, !glyphHistory.isEmpty else { return }
+        Task {
+            await persistArtworkToLibrary(library: library, userInitiated: false)
+            await MainActor.run {
+                if self.playbackIndex >= self.glyphHistory.count {
+                    self.playbackIndex = 0
+                }
+                self.isPlayingBack = true
+                self.playbackTask = Task { await self.runPlaybackLoop() }
+            }
         }
     }
 
@@ -460,7 +648,7 @@ extension AppViewModel {
                 self.playbackIndex = prefix.count
                 self.isStopped = false
                 self.isPlayingBack = false
-                eng.rebuildCanvas(from: prefix)
+                eng.rebuildCanvas(from: prefix, encodingComparisonMode: self.encodingComparisonMode)
                 self.displayImage = try? eng.snapshot()
             }
         } catch {
@@ -496,49 +684,34 @@ extension AppViewModel {
 
     #if os(iOS)
     private func exportToPhotos(data: Data, library: ArtworkLibrary?) async {
-        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
-        guard status == .authorized || status == .limited else {
-            await MainActor.run { exportMessage = "Photos access denied." }
-            return
-        }
-        let temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GlyphCanvas-\(UUID().uuidString).png")
-        do {
-            try data.write(to: temp)
-            try await PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: temp)
-            }
-            try? FileManager.default.removeItem(at: temp)
-            await MainActor.run { exportMessage = "Saved to Photos." }
+        let result = await PNGExportPlatform.save(data: data, suggestedFilename: "GlyphCanvas.png")
+        switch result {
+        case .success(let message):
+            await MainActor.run { exportMessage = message }
             await maybeAutoArchiveAfterExport(library: library, photosSucceeded: true)
-        } catch {
-            try? FileManager.default.removeItem(at: temp)
-            await MainActor.run { exportMessage = "Save failed: \(error.localizedDescription)" }
+        case .failure(let error):
+            await MainActor.run {
+                exportMessage = "Save failed: \(error.localizedDescription)"
+            }
         }
     }
     #endif
 
     #if os(macOS)
     private func exportWithSavePanel(data: Data, library: ArtworkLibrary?) async {
-        let saved: Bool = await MainActor.run {
-            let panel = NSSavePanel()
-            panel.allowedContentTypes = [.png]
-            panel.nameFieldStringValue = "GlyphCanvas.png"
-            guard panel.runModal() == .OK, let url = panel.url else {
-                exportMessage = nil
-                return false
-            }
-            do {
-                try data.write(to: url)
-                exportMessage = "Saved."
-                return true
-            } catch {
-                exportMessage = "Save failed: \(error.localizedDescription)"
-                return false
-            }
-        }
-        if saved {
+        let result = await PNGExportPlatform.save(data: data, suggestedFilename: "GlyphCanvas.png")
+        switch result {
+        case .success(let message):
+            await MainActor.run { exportMessage = message }
             await maybeAutoArchiveAfterExport(library: library, photosSucceeded: true)
+        case .failure(let error):
+            await MainActor.run {
+                if error is PNGExportUserCancelled {
+                    exportMessage = nil
+                } else {
+                    exportMessage = "Save failed: \(error.localizedDescription)"
+                }
+            }
         }
     }
     #endif
@@ -600,14 +773,17 @@ fileprivate func runGlyphOptimizationLoop(weakViewModel: AppViewModel?) async {
             guard let vm = weakViewModel else {
                 return (
                     mode: OptimizationMode.greedy,
+                    encodingComparisonMode: EncodingComparisonMode.perceptual,
+                    colorFidelity: 8.0,
                     regionSize: 12,
                     greedyCandidateCount: 6,
                     geneticConfig: GeneticEvolutionConfig.default,
                     averageFontSize: CGFloat(10),
                     iterationsPerSecond: 120.0,
-                    characterPool: CharacterSetPipeline.activeSet(
+                    stampPool: StampSetPipeline.activeSet(
                         base: GlyphCanvasCharacterSetDefaults.baseString,
-                        mode: .both
+                        mode: .both,
+                        source: .characters
                     )
                 )
             }
@@ -622,12 +798,14 @@ fileprivate func runGlyphOptimizationLoop(weakViewModel: AppViewModel?) async {
             )
             return (
                 mode: vm.optimizationMode,
+                encodingComparisonMode: vm.encodingComparisonMode,
+                colorFidelity: max(1.0, min(8.0, vm.colorFidelity)),
                 regionSize: max(2, Int(vm.regionSize.rounded())),
                 greedyCandidateCount: max(1, Int(vm.candidateCount.rounded())),
                 geneticConfig: gc,
                 averageFontSize: CGFloat(vm.averageFontSize),
                 iterationsPerSecond: max(1.0, vm.iterationsPerSecond),
-                characterPool: vm.activeCharacterSet
+                stampPool: vm.activeStamps
             )
         }
 
@@ -652,11 +830,13 @@ fileprivate func runGlyphOptimizationLoop(weakViewModel: AppViewModel?) async {
 
         let metrics = activeEngine.performIteration(
             mode: settings.mode,
+            encodingComparisonMode: settings.encodingComparisonMode,
+            colorFidelity: settings.colorFidelity,
             regionSize: settings.regionSize,
             greedyCandidateCount: settings.greedyCandidateCount,
             geneticConfig: settings.geneticConfig,
             averageFontSize: settings.averageFontSize,
-            characterPool: settings.characterPool
+            stampPool: settings.stampPool
         )
 
         if let op = metrics.committedOperation, let vm = weakViewModel {
@@ -840,7 +1020,7 @@ internal enum GlyphEarlyCoveragePhase {
 // MARK: - Last glyph params per grid cell (temporal smoothing)
 
 private struct LastCellGlyph: Sendable {
-    var character: Character
+    var stamp: String
     var fontSize: CGFloat
     var rotationDegrees: Int
 }
@@ -865,6 +1045,8 @@ struct IterationMetrics: Sendable {
 
 final class GlyphRenderEngine: @unchecked Sendable {
     private let targetBuffer: PixelBuffer
+    /// Precomputed soft edge strength (red channel 0…255); same size as `targetBuffer`.
+    private let edgeStrengthBuffer: PixelBuffer
     private let canvasBuffer: PixelBuffer
     private let canvasContext: CGContext
     private let canvasBackground: RGBAColor
@@ -898,18 +1080,24 @@ final class GlyphRenderEngine: @unchecked Sendable {
     private let lambdaRotation: Double = 0.0015
     private let lambdaSize: Double = 0.04
 
+    /// Drives `refreshAllCellErrors` and candidate scoring for this session (updated each iteration and on rebuild).
+    private var encodingComparisonMode: EncodingComparisonMode
+
     private var nextSequenceIndex: Int = 0
     /// For each `n` in `2...20`, a shuffled list of linear cell indices `0..<n²` (slot → partition cell).
     private let coverageCellPermutations: [[Int]]
 
-    init(target: CGImage, canvasBackground: RGBAColor) throws {
+    init(target: CGImage, canvasBackground: RGBAColor, initialEncodingComparisonMode: EncodingComparisonMode = .perceptual) throws {
         let targetBuffer = try ImageProcessing.makePixelBuffer(from: target)
+        let edgeStrengthBuffer = ImageProcessing.makeEdgeStrengthBuffer(from: targetBuffer)
         let canvasBuffer = PixelBuffer(width: target.width, height: target.height)
         guard let context = ImageProcessing.makeContext(width: target.width, height: target.height, data: canvasBuffer.data) else {
             throw ImageProcessingError.contextFailure
         }
 
         self.targetBuffer = targetBuffer
+        self.edgeStrengthBuffer = edgeStrengthBuffer
+        self.encodingComparisonMode = initialEncodingComparisonMode
         self.canvasBuffer = canvasBuffer
         self.canvasContext = context
         self.canvasBackground = canvasBackground
@@ -930,6 +1118,12 @@ final class GlyphRenderEngine: @unchecked Sendable {
 
         context.setFillColor(canvasBackground.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        refreshAllCellErrors()
+    }
+
+    /// Call when `EncodingComparisonMode` changes without recreating the engine (refreshes per-cell weights).
+    func setEncodingComparisonMode(_ mode: EncodingComparisonMode) {
+        encodingComparisonMode = mode
         refreshAllCellErrors()
     }
 
@@ -1003,10 +1197,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
                     cellError[i] = 0
                     continue
                 }
-                cellError[i] = Float(ImageProcessing.perceptualErrorAligned(
+                cellError[i] = Float(ImageProcessing.regionEncodingLossAligned(
+                    mode: encodingComparisonMode,
                     candidate: canvasBuffer,
                     target: targetBuffer,
-                    region: pr
+                    edgeStrength: edgeStrengthBuffer,
+                    region: pr,
+                    canvasBackground: canvasBackground
                 ))
             }
         }
@@ -1023,10 +1220,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
                 let i = cy * gridWidth + cx
                 let pr = pixelRegionForCell(cx: cx, cy: cy)
                 guard pr.width > 0, pr.height > 0 else { continue }
-                cellError[i] = Float(ImageProcessing.perceptualErrorAligned(
+                cellError[i] = Float(ImageProcessing.regionEncodingLossAligned(
+                    mode: encodingComparisonMode,
                     candidate: canvasBuffer,
                     target: targetBuffer,
-                    region: pr
+                    edgeStrength: edgeStrengthBuffer,
+                    region: pr,
+                    canvasBackground: canvasBackground
                 ))
                 cellStampDensity[i] += 1
             }
@@ -1048,12 +1248,16 @@ final class GlyphRenderEngine: @unchecked Sendable {
     /// One optimization step: greedy **or** localized GA for the chosen region, then commit the winner.
     func performIteration(
         mode: OptimizationMode,
+        encodingComparisonMode: EncodingComparisonMode,
+        colorFidelity: Double,
         regionSize: Int,
         greedyCandidateCount: Int,
         geneticConfig: GeneticEvolutionConfig,
         averageFontSize: CGFloat,
-        characterPool: [Character]
+        stampPool: [String]
     ) -> IterationMetrics {
+        self.encodingComparisonMode = encodingComparisonMode
+
         if Task.isCancelled {
             return IterationMetrics(
                 committed: false,
@@ -1088,7 +1292,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
 
         let meanY = ImageProcessing.meanLuminance(in: region, from: targetBuffer)
         let rgb = ImageProcessing.representativeColor(in: region, from: targetBuffer)
-        let dominantColor = ImageProcessing.rgbaColor(from: rgb)
+        let colorQuantizationStep = ImageProcessing.colorQuantizationStep(forFidelity: colorFidelity)
+        let dominantColor = ImageProcessing.quantizeRGB(ImageProcessing.rgbaColor(from: rgb), step: colorQuantizationStep)
 
         let baseline = canvasBuffer.copyRegion(region)
         let primaryCell = cellIndex(px: region.x + region.width / 2, py: region.y + region.height / 2)
@@ -1116,10 +1321,12 @@ final class GlyphRenderEngine: @unchecked Sendable {
                 primaryCell: primaryCell,
                 meanY: meanY,
                 dominantColor: dominantColor,
+                colorQuantizationStep: colorQuantizationStep,
                 candidateCount: greedyCandidateCount,
                 averageFontSize: effectiveRef,
                 stampIsBold: stampIsBold,
-                characterPool: characterPool
+                stampPool: stampPool,
+                encodingComparisonMode: encodingComparisonMode
             )
         case .genetic:
             return geneticStep(
@@ -1129,11 +1336,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
                 scratchContext: scratchContext,
                 primaryCell: primaryCell,
                 meanY: meanY,
-                baseRGB: rgb,
+                baseRGB: ImageProcessing.quantizeRGB(rgb, step: colorQuantizationStep),
+                colorQuantizationStep: colorQuantizationStep,
                 config: geneticConfig,
                 averageFontSize: effectiveRef,
                 stampIsBold: stampIsBold,
-                characterPool: characterPool
+                stampPool: stampPool,
+                encodingComparisonMode: encodingComparisonMode
             )
         }
     }
@@ -1146,10 +1355,12 @@ final class GlyphRenderEngine: @unchecked Sendable {
         primaryCell: Int,
         meanY: Double,
         dominantColor: RGBAColor,
+        colorQuantizationStep: Int,
         candidateCount: Int,
         averageFontSize: CGFloat,
         stampIsBold: Bool,
-        characterPool: [Character]
+        stampPool: [String],
+        encodingComparisonMode: EncodingComparisonMode
     ) -> IterationMetrics {
         var bestCandidate: GlyphCandidate?
         var bestScore = Double.infinity
@@ -1158,13 +1369,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
             if Task.isCancelled {
                 break
             }
-            var ch: Character
+            let stamp: String
             if Double.random(in: 0..<1) < blendProbability, let last = cellLastGlyph[primaryCell] {
-                ch = Double.random(in: 0..<1) < 0.5
-                    ? last.character
-                    : ImageProcessing.randomCoverageAwareCharacter(meanLuminanceY: meanY, characterPool: characterPool)
+                stamp = Double.random(in: 0..<1) < 0.5
+                    ? last.stamp
+                    : ImageProcessing.randomCoverageAwareStamp(meanLuminanceY: meanY, stampPool: stampPool)
             } else {
-                ch = ImageProcessing.randomCoverageAwareCharacter(meanLuminanceY: meanY, characterPool: characterPool)
+                stamp = ImageProcessing.randomCoverageAwareStamp(meanLuminanceY: meanY, stampPool: stampPool)
             }
 
             var fs = averageFontSize + CGFloat.random(in: -2...2)
@@ -1181,10 +1392,10 @@ final class GlyphRenderEngine: @unchecked Sendable {
             let qRad = ImageProcessing.radians(fromQuantizedDegrees: qDeg)
 
             let candidate = GlyphCandidate(
-                character: String(ch),
+                character: stamp,
                 fontSize: fs,
                 rotationRadians: qRad,
-                color: dominantColor,
+                color: ImageProcessing.quantizeRGB(dominantColor, step: colorQuantizationStep),
                 region: region,
                 isBold: stampIsBold
             )
@@ -1220,10 +1431,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
                 in: scratchContext
             )
 
-            var score = ImageProcessing.perceptualError(
+            var score = ImageProcessing.regionEncodingLoss(
+                mode: encodingComparisonMode,
                 candidate: scratchBuffer,
                 target: targetBuffer,
-                region: region
+                edgeStrength: edgeStrengthBuffer,
+                region: region,
+                canvasBackground: canvasBackground
             )
 
             if let last = cellLastGlyph[primaryCell] {
@@ -1257,13 +1471,15 @@ final class GlyphRenderEngine: @unchecked Sendable {
         primaryCell: Int,
         meanY: Double,
         baseRGB: SIMD3<Float>,
+        colorQuantizationStep: Int,
         config: GeneticEvolutionConfig,
         averageFontSize: CGFloat,
         stampIsBold: Bool,
-        characterPool: [Character]
+        stampPool: [String],
+        encodingComparisonMode: EncodingComparisonMode
     ) -> IterationMetrics {
         let prior = cellLastGlyph[primaryCell].map {
-            GlyphCellPrior(character: $0.character, fontSize: $0.fontSize, rotationDegrees: $0.rotationDegrees)
+            GlyphCellPrior(stamp: $0.stamp, fontSize: $0.fontSize, rotationDegrees: $0.rotationDegrees)
         }
         let seed = cellBestGenome[primaryCell]
 
@@ -1274,7 +1490,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
             meanLuminanceY: meanY,
             averageFontSize: averageFontSize,
             baseRGB: baseRGB,
-            characterPool: characterPool,
+            colorQuantizationStep: colorQuantizationStep,
+            stampPool: stampPool,
             stampIsBold: stampIsBold,
             evaluateFitness: { genome in
                 let candidate = genome.toCandidate(region: region)
@@ -1309,10 +1526,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
                     in: scratchContext
                 )
 
-                let pe = ImageProcessing.perceptualError(
+                let pe = ImageProcessing.regionEncodingLoss(
+                    mode: encodingComparisonMode,
                     candidate: scratchBuffer,
                     target: targetBuffer,
-                    region: region
+                    edgeStrength: edgeStrengthBuffer,
+                    region: region,
+                    canvasBackground: canvasBackground
                 )
                 return GlyphFitness.fitness(
                     perceptualError: pe,
@@ -1325,10 +1545,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
         )
 
         guard let bestGenome = evolution.bestGenome else {
-            let fallback = ImageProcessing.perceptualErrorAligned(
+            let fallback = ImageProcessing.regionEncodingLossAligned(
+                mode: encodingComparisonMode,
                 candidate: canvasBuffer,
                 target: targetBuffer,
-                region: region
+                edgeStrength: edgeStrengthBuffer,
+                region: region,
+                canvasBackground: canvasBackground
             )
             return IterationMetrics(
                 committed: false,
@@ -1382,10 +1605,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
             offsetY: bestCandidate.centerOffsetY,
             in: scratchContext
         )
-        let pe = ImageProcessing.perceptualError(
+        let pe = ImageProcessing.regionEncodingLoss(
+            mode: encodingComparisonMode,
             candidate: scratchBuffer,
             target: targetBuffer,
-            region: region
+            edgeStrength: edgeStrengthBuffer,
+            region: region,
+            canvasBackground: canvasBackground
         )
         let totalLoss = GlyphFitness.totalLoss(
             perceptualError: pe,
@@ -1428,8 +1654,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
             updateCellErrorsAndStampDensity(forCommittedRegion: region)
 
             let qd = ImageProcessing.quantizedRotationDegrees(best.rotationRadians)
-            let ch = best.character.first ?? "?"
-            cellLastGlyph[primaryCell] = LastCellGlyph(character: ch, fontSize: best.fontSize, rotationDegrees: qd)
+            let st = best.character.isEmpty ? "?" : best.character
+            cellLastGlyph[primaryCell] = LastCellGlyph(stamp: st, fontSize: best.fontSize, rotationDegrees: qd)
             committed = true
             let seq = nextSequenceIndex
             nextSequenceIndex += 1
@@ -1440,10 +1666,13 @@ final class GlyphRenderEngine: @unchecked Sendable {
         }
 
         if score == .infinity || score.isNaN {
-            score = ImageProcessing.perceptualErrorAligned(
+            score = ImageProcessing.regionEncodingLossAligned(
+                mode: encodingComparisonMode,
                 candidate: canvasBuffer,
                 target: targetBuffer,
-                region: region
+                edgeStrength: edgeStrengthBuffer,
+                region: region,
+                canvasBackground: canvasBackground
             )
         }
 
@@ -1459,7 +1688,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
     }
 
     /// Rebuilds canvas and regional optimizer state from a prefix of operations (timeline fork).
-    func rebuildCanvas(from operations: [GlyphOperation]) {
+    func rebuildCanvas(from operations: [GlyphOperation], encodingComparisonMode: EncodingComparisonMode) {
+        self.encodingComparisonMode = encodingComparisonMode
         canvasContext.setFillColor(canvasBackground.cgColor)
         canvasContext.fill(CGRect(x: 0, y: 0, width: width, height: height))
 
@@ -1477,8 +1707,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
             ImageProcessing.drawGlyph(best, in: canvasContext)
             updateCellErrorsAndStampDensity(forCommittedRegion: region)
             let qd = ImageProcessing.quantizedRotationDegrees(best.rotationRadians)
-            let ch = best.character.first ?? "?"
-            cellLastGlyph[primaryCell] = LastCellGlyph(character: ch, fontSize: best.fontSize, rotationDegrees: qd)
+            let st = best.character.isEmpty ? "?" : best.character
+            cellLastGlyph[primaryCell] = LastCellGlyph(stamp: st, fontSize: best.fontSize, rotationDegrees: qd)
             nextSequenceIndex += 1
         }
     }
@@ -1497,38 +1727,3 @@ extension AppViewModel {
     }
 }
 
-// MARK: - Character set (case filter + dedupe)
-
-/// Centralized pipeline so `activeCharacterSet` and density bucketing stay consistent.
-fileprivate enum CharacterSetPipeline {
-    /// Applies case rules to letters only; preserves order; first-seen wins for duplicates.
-    static func filteredOrderedUnique(from raw: String, mode: CharacterCaseMode) -> [Character] {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        var seen = Set<Character>()
-        var out: [Character] = []
-        out.reserveCapacity(trimmed.count)
-        for ch in trimmed {
-            let keep: Bool
-            if ch.isLetter {
-                switch mode {
-                case .uppercase: keep = ch.isUppercase
-                case .lowercase: keep = ch.isLowercase
-                case .both: keep = true
-                }
-            } else {
-                keep = true
-            }
-            guard keep, seen.insert(ch).inserted else { continue }
-            out.append(ch)
-        }
-        return out
-    }
-
-    static func activeSet(base: String, mode: CharacterCaseMode) -> [Character] {
-        var first = filteredOrderedUnique(from: base, mode: mode)
-        if !first.isEmpty { return first }
-        first = filteredOrderedUnique(from: GlyphCanvasCharacterSetDefaults.baseString, mode: mode)
-        if !first.isEmpty { return first }
-        return ["?"]
-    }
-}

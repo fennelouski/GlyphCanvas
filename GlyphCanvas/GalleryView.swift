@@ -3,12 +3,21 @@
 //  GlyphCanvas
 //
 
+import CoreGraphics
 import SwiftUI
 
 struct GalleryView: View {
     @EnvironmentObject private var library: ArtworkLibrary
+    @EnvironmentObject private var navigationHistory: MacNavigationHistory
+    @StateObject private var holdPreviewPlayer = GalleryHoldPreviewPlayer()
     @Binding var mainTab: MainTab
     @Binding var studioAutoPresentImagePicker: Bool
+
+    @State private var holdSessionID = UUID()
+    @State private var pressingEntryID: UUID?
+    @State private var activePreviewEntryID: UUID?
+    @State private var pressStartedAt: Date?
+    @State private var fullscreenItem: GalleryFullscreenItem?
 
     var body: some View {
         Group {
@@ -32,6 +41,30 @@ struct GalleryView: View {
         .refreshable {
             try? library.reloadFromDisk()
         }
+        #if os(iOS)
+        .fullScreenCover(item: $fullscreenItem) { item in
+            GalleryPlaybackFullscreenView(
+                artworkID: item.id,
+                isPresented: Binding(
+                    get: { fullscreenItem != nil },
+                    set: { if !$0 { fullscreenItem = nil } }
+                )
+            )
+            .environmentObject(library)
+        }
+        #else
+        .sheet(item: $fullscreenItem) { item in
+            GalleryPlaybackFullscreenView(
+                artworkID: item.id,
+                isPresented: Binding(
+                    get: { fullscreenItem != nil },
+                    set: { if !$0 { fullscreenItem = nil } }
+                )
+            )
+            .environmentObject(library)
+            .frame(minWidth: 720, minHeight: 560)
+        }
+        #endif
     }
 
     // MARK: - Collected works (masonry)
@@ -62,10 +95,16 @@ struct GalleryView: View {
                         ForEach(0..<columnCount, id: \.self) { index in
                             VStack(spacing: spacing) {
                                 ForEach(columns[index]) { entry in
-                                    NavigationLink(value: AppRoute.detail(entry.id)) {
-                                        GalleryMasonryCard(entry: entry, columnWidth: columnWidth)
-                                    }
-                                    .buttonStyle(.plain)
+                                    GalleryEntryTile(
+                                        entry: entry,
+                                        columnWidth: columnWidth,
+                                        holdPreviewPlayer: holdPreviewPlayer,
+                                        holdSessionID: $holdSessionID,
+                                        pressingEntryID: $pressingEntryID,
+                                        activePreviewEntryID: $activePreviewEntryID,
+                                        pressStartedAt: $pressStartedAt,
+                                        fullscreenItem: $fullscreenItem
+                                    )
                                 }
                             }
                             .frame(width: columnWidth)
@@ -137,6 +176,86 @@ struct GalleryView: View {
     private static let cardFooterChrome: CGFloat = 86
 }
 
+private struct GalleryFullscreenItem: Identifiable {
+    let id: UUID
+}
+
+private struct GalleryEntryTile: View {
+    let entry: ArtworkIndexEntry
+    let columnWidth: CGFloat
+
+    @EnvironmentObject private var library: ArtworkLibrary
+    @EnvironmentObject private var navigationHistory: MacNavigationHistory
+
+    @ObservedObject var holdPreviewPlayer: GalleryHoldPreviewPlayer
+    @Binding var holdSessionID: UUID
+    @Binding var pressingEntryID: UUID?
+    @Binding var activePreviewEntryID: UUID?
+    @Binding var pressStartedAt: Date?
+    @Binding var fullscreenItem: GalleryFullscreenItem?
+
+    private let longPressLeadNanoseconds: UInt64 = 400_000_000
+    private let fullscreenHoldNanoseconds: UInt64 = 12_000_000_000
+    private let tapNavigationMaxSeconds: TimeInterval = 0.25
+
+    var body: some View {
+        GalleryMasonryCard(
+            entry: entry,
+            columnWidth: columnWidth,
+            previewImage: activePreviewEntryID == entry.id ? holdPreviewPlayer.currentImage : nil
+        )
+        .overlay {
+            GalleryTilePressOverlay(
+                onPressBegan: { tilePressBegan() },
+                onPressReleased: { duration, liftedNormally in
+                    tilePressReleased(duration: duration, liftedNormally: liftedNormally)
+                }
+            )
+        }
+    }
+
+    private func tilePressBegan() {
+        guard pressingEntryID == nil else { return }
+        pressingEntryID = entry.id
+        holdSessionID = UUID()
+        let session = holdSessionID
+        pressStartedAt = Date()
+        Task {
+            try? await Task.sleep(nanoseconds: longPressLeadNanoseconds)
+            await MainActor.run {
+                guard session == holdSessionID, pressingEntryID == entry.id else { return }
+                holdPreviewPlayer.begin(library: library, artworkID: entry.id)
+                activePreviewEntryID = entry.id
+            }
+        }
+        Task {
+            try? await Task.sleep(nanoseconds: fullscreenHoldNanoseconds)
+            await MainActor.run {
+                guard session == holdSessionID, pressingEntryID == entry.id else { return }
+                fullscreenItem = GalleryFullscreenItem(id: entry.id)
+                holdPreviewPlayer.cancel()
+                activePreviewEntryID = nil
+                pressingEntryID = nil
+                holdSessionID = UUID()
+            }
+        }
+    }
+
+    private func tilePressReleased(duration: TimeInterval, liftedNormally: Bool) {
+        let eid = entry.id
+        if liftedNormally, duration < tapNavigationMaxSeconds {
+            navigationHistory.galleryPath.append(.detail(eid))
+        }
+        holdSessionID = UUID()
+        if activePreviewEntryID == eid {
+            holdPreviewPlayer.cancel()
+            activePreviewEntryID = nil
+        }
+        pressingEntryID = nil
+        pressStartedAt = nil
+    }
+}
+
 // MARK: - Collected header & placeholder
 
 private struct GalleryCollectedTopBar: View {
@@ -203,17 +322,11 @@ private struct GalleryNewArchivePlaceholder: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 10) {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(GalleryTheme.accent.opacity(0.75))
-                Text("INITIALIZE NEW ARCHIVE")
-                    .font(.caption.monospaced().weight(.semibold))
-                    .foregroundStyle(GalleryTheme.hudDetail)
-                    .multilineTextAlignment(.center)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 36)
+            Image(systemName: "plus")
+                .font(.system(size: 52, weight: .medium))
+                .foregroundStyle(GalleryTheme.accent.opacity(0.85))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 44)
             .background(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [7, 6]))
@@ -221,7 +334,7 @@ private struct GalleryNewArchivePlaceholder: View {
             )
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Initialize new archive")
+        .accessibilityLabel("New archive")
     }
 }
 
@@ -230,6 +343,7 @@ private struct GalleryNewArchivePlaceholder: View {
 private struct GalleryMasonryCard: View {
     let entry: ArtworkIndexEntry
     let columnWidth: CGFloat
+    var previewImage: CGImage?
 
     @EnvironmentObject private var library: ArtworkLibrary
 
@@ -242,33 +356,21 @@ private struct GalleryMasonryCard: View {
     }
 
     var body: some View {
-        let tag = GalleryArchiveNaming.statusTag(for: entry.id)
         VStack(alignment: .leading, spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                artworkImage
-                    .frame(width: columnWidth, height: imageHeight)
-                    .clipped()
-
-                statusTag(text: tag.text, isLocked: tag.isLocked)
-                    .padding(8)
-            }
+            artworkImage
+                .frame(width: columnWidth, height: imageHeight)
+                .clipped()
 
             VStack(alignment: .leading, spacing: 6) {
-                Text(GalleryArchiveNaming.compositionTitle(for: entry.id))
+                Text(GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id))
                     .font(.subheadline.weight(.heavy))
                     .foregroundStyle(GalleryTheme.headline)
                     .lineLimit(2)
                     .minimumScaleFactor(0.88)
 
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Self.formattedArchiveDate(entry.createdAt))
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(GalleryTheme.bodyMuted)
-                    Spacer(minLength: 0)
-                    Text("\(entry.glyphCount)")
-                        .font(.caption2.monospaced().weight(.bold))
-                        .foregroundStyle(GalleryTheme.accent.opacity(0.95))
-                }
+                Text(Self.formattedArchiveDate(entry.createdAt))
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(GalleryTheme.bodyMuted)
             }
             .padding(12)
         }
@@ -278,46 +380,41 @@ private struct GalleryMasonryCard: View {
                 .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(GalleryArchiveNaming.compositionTitle(for: entry.id)), \(Self.formattedArchiveDate(entry.createdAt))")
+        .accessibilityLabel("\(GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id)), \(Self.formattedArchiveDate(entry.createdAt))")
     }
 
     private var artworkImage: some View {
-        AsyncImage(url: library.thumbURL(for: entry.id)) { phase in
-            switch phase {
-            case .empty:
-                Rectangle()
-                    .fill(Color.white.opacity(0.06))
-                    .overlay { ProgressView() }
-            case .success(let image):
-                image
+        Group {
+            if let preview = previewImage {
+                Image(decorative: preview, scale: 1.0)
                     .resizable()
                     .interpolation(.none)
                     .scaledToFill()
-            case .failure:
-                Rectangle()
-                    .fill(Color.white.opacity(0.06))
-                    .overlay {
-                        Image(systemName: "photo")
-                            .foregroundStyle(.secondary)
+            } else {
+                AsyncImage(url: library.thumbURL(for: entry.id)) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle()
+                            .fill(Color.white.opacity(0.06))
+                            .overlay { ProgressView() }
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .interpolation(.none)
+                            .scaledToFill()
+                    case .failure:
+                        Rectangle()
+                            .fill(Color.white.opacity(0.06))
+                            .overlay {
+                                Image(systemName: "photo")
+                                    .foregroundStyle(.secondary)
+                            }
+                    @unknown default:
+                        EmptyView()
                     }
-            @unknown default:
-                EmptyView()
+                }
             }
         }
-    }
-
-    private func statusTag(text: String, isLocked: Bool) -> some View {
-        Text(text)
-            .font(.caption2.monospaced().weight(.heavy))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(
-                isLocked
-                    ? Color(red: 0.52, green: 0.2, blue: 0.2).opacity(0.92)
-                    : GalleryTheme.accent.opacity(0.4),
-                in: RoundedRectangle(cornerRadius: 4, style: .continuous)
-            )
-            .foregroundStyle(isLocked ? Color.white : GalleryTheme.onAccentFill)
     }
 
     private static let archiveDateFormatter: DateFormatter = {

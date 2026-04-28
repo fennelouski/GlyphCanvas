@@ -40,13 +40,12 @@ enum GalleryArchiveNaming {
         return "\(left[li]) \(right[ri])"
     }
 
-    /// Renders as `TYPE-02` … `TYPE-06`, or a locked state for a rare subset.
-    static func statusTag(for id: UUID) -> (text: String, isLocked: Bool) {
-        let m = id.galleryStableMix
-        if m % 13 == 0 {
-            return ("LOCKED", true)
+    /// Gallery-facing title: optional import-derived prefix plus the unique generated pair.
+    static func displayTitle(titlePrefix: String?, for id: UUID) -> String {
+        let unique = compositionTitle(for: id)
+        if let p = titlePrefix?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
+            return "\(p) · \(unique)"
         }
-        let n = Int((m % 6) + 1)
-        return (String(format: "TYPE-%02d", n), false)
+        return unique
     }
 }

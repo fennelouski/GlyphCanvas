@@ -9,7 +9,8 @@ import simd
 
 /// Evolvable glyph parameters for a single region. Higher-level fitness is computed externally.
 struct GlyphGenome: Sendable {
-    var character: Character
+    /// Single stamp: one character, one emoji, or one word.
+    var stamp: String
     var fontSize: CGFloat
     var rotationRadians: CGFloat
     /// RGB 0…255
@@ -34,7 +35,7 @@ struct GlyphGenome: Sendable {
         let qDeg = ImageProcessing.quantizedRotationDegrees(rotationRadians)
         let qRad = ImageProcessing.radians(fromQuantizedDegrees: qDeg)
         return GlyphCandidate(
-            character: String(character),
+            character: stamp,
             fontSize: fs,
             rotationRadians: qRad,
             color: rgbaColor(),
@@ -52,11 +53,12 @@ struct GlyphGenome: Sendable {
         meanLuminanceY: Double,
         averageFontSize: CGFloat,
         baseRGB: SIMD3<Float>,
-        characterPool: [Character],
+        colorQuantizationStep: Int = 1,
+        stampPool: [String],
         isBold: Bool,
         rng: inout some RandomNumberGenerator
     ) -> GlyphGenome {
-        let ch = ImageProcessing.randomCoverageAwareCharacter(meanLuminanceY: meanLuminanceY, characterPool: characterPool)
+        let ch = ImageProcessing.randomCoverageAwareStamp(meanLuminanceY: meanLuminanceY, stampPool: stampPool)
         var fs = averageFontSize + CGFloat.random(in: -2...2, using: &rng)
         fs = max(4, fs)
         let rot = CGFloat.random(in: (-.pi / 2)...(.pi / 2), using: &rng)
@@ -66,13 +68,16 @@ struct GlyphGenome: Sendable {
         let r = baseRGB.x + Float.random(in: -18...18, using: &rng)
         let g = baseRGB.y + Float.random(in: -18...18, using: &rng)
         let b = baseRGB.z + Float.random(in: -18...18, using: &rng)
+        let qr = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, r)).rounded()), step: colorQuantizationStep)
+        let qg = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, g)).rounded()), step: colorQuantizationStep)
+        let qb = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, b)).rounded()), step: colorQuantizationStep)
         return GlyphGenome(
-            character: ch,
+            stamp: ch,
             fontSize: fs,
             rotationRadians: rot,
-            colorR: min(255, max(0, r)),
-            colorG: min(255, max(0, g)),
-            colorB: min(255, max(0, b)),
+            colorR: Float(qr),
+            colorG: Float(qg),
+            colorB: Float(qb),
             offsetX: ox,
             offsetY: oy,
             isBold: isBold
@@ -85,12 +90,13 @@ struct GlyphGenome: Sendable {
         meanLuminanceY: Double,
         averageFontSize: CGFloat,
         baseRGB: SIMD3<Float>,
-        characterPool: [Character],
+        colorQuantizationStep: Int = 1,
+        stampPool: [String],
         stampIsBold: Bool,
         rng: inout some RandomNumberGenerator
     ) {
         if Double.random(in: 0..<1, using: &rng) < 0.05 {
-            character = ImageProcessing.randomCoverageAwareCharacter(meanLuminanceY: meanLuminanceY, characterPool: characterPool)
+            stamp = ImageProcessing.randomCoverageAwareStamp(meanLuminanceY: meanLuminanceY, stampPool: stampPool)
         }
 
         let dSize = CGFloat.random(in: -2...2, using: &rng)
@@ -103,6 +109,9 @@ struct GlyphGenome: Sendable {
         colorR = min(255, max(0, colorR + Float.random(in: -22...22, using: &rng)))
         colorG = min(255, max(0, colorG + Float.random(in: -22...22, using: &rng)))
         colorB = min(255, max(0, colorB + Float.random(in: -22...22, using: &rng)))
+        colorR = Float(ImageProcessing.quantizeChannel(UInt8(colorR.rounded()), step: colorQuantizationStep))
+        colorG = Float(ImageProcessing.quantizeChannel(UInt8(colorG.rounded()), step: colorQuantizationStep))
+        colorB = Float(ImageProcessing.quantizeChannel(UInt8(colorB.rounded()), step: colorQuantizationStep))
 
         let jitterMax = max(1, min(region.width, region.height) / 4)
         offsetX += CGFloat.random(in: -1.5...1.5, using: &rng)
@@ -116,7 +125,8 @@ struct GlyphGenome: Sendable {
                 meanLuminanceY: meanLuminanceY,
                 averageFontSize: averageFontSize,
                 baseRGB: baseRGB,
-                characterPool: characterPool,
+                colorQuantizationStep: colorQuantizationStep,
+                stampPool: stampPool,
                 isBold: stampIsBold,
                 rng: &rng
             )
@@ -126,9 +136,10 @@ struct GlyphGenome: Sendable {
     static func crossover(
         _ a: GlyphGenome,
         _ b: GlyphGenome,
+        colorQuantizationStep: Int = 1,
         rng: inout some RandomNumberGenerator
     ) -> GlyphGenome {
-        let charParent = Bool.random(using: &rng) ? a : b
+        let stampParent = Bool.random(using: &rng) ? a : b
         let sizeParent = Bool.random(using: &rng) ? a : b
         let rot: CGFloat
         if Bool.random(using: &rng) {
@@ -142,13 +153,16 @@ struct GlyphGenome: Sendable {
         let bl = Float(t) * a.colorB + Float(1 - t) * b.colorB
         let ox = (a.offsetX + b.offsetX) / 2 + CGFloat.random(in: -0.75...0.75, using: &rng)
         let oy = (a.offsetY + b.offsetY) / 2 + CGFloat.random(in: -0.75...0.75, using: &rng)
+        let qr = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, r)).rounded()), step: colorQuantizationStep)
+        let qg = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, g)).rounded()), step: colorQuantizationStep)
+        let qb = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, bl)).rounded()), step: colorQuantizationStep)
         return GlyphGenome(
-            character: charParent.character,
+            stamp: stampParent.stamp,
             fontSize: sizeParent.fontSize,
             rotationRadians: rot,
-            colorR: min(255, max(0, r)),
-            colorG: min(255, max(0, g)),
-            colorB: min(255, max(0, bl)),
+            colorR: Float(qr),
+            colorG: Float(qg),
+            colorB: Float(qb),
             offsetX: ox,
             offsetY: oy,
             isBold: Bool.random(using: &rng) ? a.isBold : b.isBold
@@ -158,7 +172,7 @@ struct GlyphGenome: Sendable {
 
 extension GlyphGenome: Equatable {
     nonisolated static func == (lhs: GlyphGenome, rhs: GlyphGenome) -> Bool {
-        lhs.character == rhs.character &&
+        lhs.stamp == rhs.stamp &&
             lhs.fontSize == rhs.fontSize &&
             lhs.rotationRadians == rhs.rotationRadians &&
             lhs.colorR == rhs.colorR &&
