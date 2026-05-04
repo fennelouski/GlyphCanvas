@@ -8,7 +8,7 @@ import SwiftUI
 
 #if os(iOS)
 
-/// iPhone empty Studio: hero, marketing copy, dashed import CTA, demo and URL shortcuts.
+/// iPhone empty Studio: hero, marketing copy, dashed import CTA, URL shortcut.
 struct StudioEmptyStateView: View {
     let onImagePicked: (CGImage, ImportHints?) -> Void
     var autoPresentImagePicker: Binding<Bool>?
@@ -132,27 +132,8 @@ struct StudioEmptyStateView: View {
     }
 
     private var secondaryActionsRow: some View {
-        HStack(spacing: 10) {
-            Button {
-                if let cg = DemoSourceImage.makeMosaicCGImage() {
-                    onImagePicked(cg, nil)
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "sparkles")
-                        .font(.caption.weight(.semibold))
-                    Text("TRY DEMO IMAGE")
-                        .font(.caption.weight(.heavy))
-                        .tracking(0.4)
-                }
-                .foregroundStyle(GalleryTheme.headline)
-            }
-            .buttonStyle(.plain)
-
-            Text("·")
-                .foregroundStyle(GalleryTheme.hudDetail)
-                .font(.caption.weight(.bold))
-
+        HStack {
+            Spacer(minLength: 0)
             Button {
                 showPasteURLSheet = true
             } label: {
@@ -166,6 +147,7 @@ struct StudioEmptyStateView: View {
                 .foregroundStyle(GalleryTheme.headline)
             }
             .buttonStyle(.plain)
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity)
     }

@@ -6,6 +6,9 @@
 import CoreGraphics
 import SwiftUI
 import WebImagePicker
+#if os(iOS)
+import UIKit
+#endif
 
 struct PageURLPickItem: Identifiable {
     let url: URL
@@ -98,8 +101,19 @@ struct URLImportSheet: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var pagePickItem: PageURLPickItem?
+#if os(iOS)
+    @FocusState private var isURLFieldFocused: Bool
+#endif
 
     let onImagePicked: (CGImage, ImportHints?) -> Void
+
+    private var trimmedURLText: String {
+        urlText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canSubmitLoad: Bool {
+        !trimmedURLText.isEmpty && !isLoading
+    }
 
     var body: some View {
         NavigationStack {
@@ -110,6 +124,8 @@ struct URLImportSheet: View {
                         .autocorrectionDisabled()
 #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        .keyboardType(.URL)
+                        .focused($isURLFieldFocused)
 #endif
                 } header: {
                     Text("Image URL")
@@ -131,15 +147,43 @@ struct URLImportSheet: View {
             .navigationTitle("Import from URL")
 #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                DispatchQueue.main.async {
+                    isURLFieldFocused = true
+                }
+            }
 #endif
             .toolbar {
+#if os(iOS)
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .accessibilityLabel("Cancel")
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Button("Paste") {
+                        pasteURLFromClipboard()
+                    }
+                    Spacer()
+                    Button("Load") {
+                        Task { await load() }
+                    }
+                    .disabled(!canSubmitLoad)
+                }
+#else
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Load") { Task { await load() } }
-                        .disabled(isLoading || urlText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!canSubmitLoad)
                 }
+#endif
             }
             .overlay {
                 if isLoading {
@@ -167,6 +211,13 @@ struct URLImportSheet: View {
             }
         }
     }
+
+#if os(iOS)
+    private func pasteURLFromClipboard() {
+        guard let s = UIPasteboard.general.string else { return }
+        urlText = s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+#endif
 
     private func load() async {
         errorMessage = nil

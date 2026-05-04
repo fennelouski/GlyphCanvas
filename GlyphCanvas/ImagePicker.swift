@@ -113,12 +113,20 @@ struct IOSImageSourcePickerSheet: View {
             .navigationTitle("Select Image")
 #if os(iOS) && !os(visionOS)
             .navigationBarTitleDisplayMode(.inline)
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
 #endif
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         isPresented = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.body)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.secondary, .tertiary)
                     }
+                    .accessibilityLabel(String(localized: "Close"))
                 }
             }
         }

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		801827C02FA891D500D68E02 /* WebImagePicker in Frameworks */ = {isa = PBXBuildFile; productRef = 81D0E7712F92800100F96421 /* WebImagePicker */; };
 		806BF6412F91461E002930E6 /* AppIntents.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 806BF6402F91461E002930E6 /* AppIntents.framework */; };
 /* End PBXBuildFile section */
 
@@ -70,6 +71,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				801827C02FA891D500D68E02 /* WebImagePicker in Frameworks */,
 				806BF6412F91461E002930E6 /* AppIntents.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -224,13 +226,13 @@
 			);
 			mainGroup = 806BF6072F91461D002930E6;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "../SwiftUI Web Image Picker/Packages/WebImagePicker" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 806BF6112F91461D002930E6 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			packageReferences = (
-				81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "WebImagePicker" */,
-			);
 			targets = (
 				806BF60F2F91461D002930E6 /* GlyphCanvas */,
 				806BF6202F91461E002930E6 /* GlyphCanvasTests */,
@@ -651,7 +653,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "WebImagePicker" */ = {
+		81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "../SwiftUI Web Image Picker/Packages/WebImagePicker" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../SwiftUI Web Image Picker/Packages/WebImagePicker";
 		};
@@ -660,7 +662,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		81D0E7712F92800100F96421 /* WebImagePicker */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "WebImagePicker" */;
+			package = 81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "../SwiftUI Web Image Picker/Packages/WebImagePicker" */;
 			productName = WebImagePicker;
 		};
 /* End XCSwiftPackageProductDependency section */
