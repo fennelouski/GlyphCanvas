@@ -5,6 +5,7 @@
 
 import CoreGraphics
 import SwiftUI
+import WebImagePicker
 
 struct PageURLPickItem: Identifiable {
     let url: URL
@@ -36,6 +37,57 @@ enum URLImportFlow {
         case .failed(let err):
             return .failed(err.localizedDescription)
         }
+    }
+}
+
+/// Decodes package selections into the app’s `CGImage` + `ImportHints` pipeline.
+enum WebImageImportBridge {
+    static func cgImageAndImportHints(from selection: WebImageSelection) -> (CGImage, ImportHints)? {
+        let data: Data
+        if !selection.data.isEmpty {
+            data = selection.data
+        } else if let file = selection.temporaryFileURL, let fileData = try? Data(contentsOf: file) {
+            data = fileData
+        } else {
+            return nil
+        }
+        guard !data.isEmpty, let cg = ImageProcessing.decodeCGImage(data: data) else { return nil }
+        return (cg, ImportHints(imageData: data, sourcePageURL: selection.sourceURL))
+    }
+}
+
+/// Web page image discovery via `WebImagePicker` when `URLImportFlow` detects HTML.
+///
+/// - http + https to match `URLImageImportHelpers`.
+/// - `extractionMode: .webView` for pages that inject images at runtime (replaces the old hidden `WKWebView` scraper).
+/// - `initialURLString` plus `automaticallyLoadOnAppear` so discovery starts immediately with the resolved page URL (no extra “Load page” tap).
+struct GlyphCanvasWebImagePagePicker: View {
+    let pageURL: URL
+    var onCancel: () -> Void
+    var onImagePicked: (CGImage, ImportHints?) -> Void
+
+    var body: some View {
+        WebImagePicker(
+            configuration: webImageConfiguration,
+            onCancel: onCancel,
+            onPick: { selections in
+                guard let first = selections.first,
+                      let result = WebImageImportBridge.cgImageAndImportHints(from: first) else { return }
+                onImagePicked(result.0, result.1)
+            }
+        )
+#if os(macOS)
+        .frame(minWidth: 480, minHeight: 400)
+#endif
+    }
+
+    private var webImageConfiguration: WebImagePickerConfiguration {
+        WebImagePickerConfiguration(
+            allowedURLSchemes: ["http", "https"],
+            extractionMode: .webView,
+            initialURLString: pageURL.absoluteString,
+            automaticallyLoadOnAppear: true
+        )
     }
 }
 
@@ -106,7 +158,9 @@ struct URLImportSheet: View {
         .frame(minWidth: 460, idealWidth: 500, minHeight: 240)
 #endif
         .sheet(item: $pagePickItem) { item in
-            PageImagesFromWebSheet(pageURL: item.url) { cgImage, hints in
+            GlyphCanvasWebImagePagePicker(pageURL: item.url) {
+                pagePickItem = nil
+            } onImagePicked: { cgImage, hints in
                 onImagePicked(cgImage, hints)
                 pagePickItem = nil
                 dismiss()
@@ -128,181 +182,6 @@ struct URLImportSheet: View {
             pagePickItem = PageURLPickItem(url: pageURL)
         case .failed(let message):
             errorMessage = message
-        }
-    }
-}
-
-struct PageImagesFromWebSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let pageURL: URL
-    let onImagePicked: (CGImage, ImportHints?) -> Void
-
-    @State private var phase: Phase = .loadingWeb
-    @State private var imageURLs: [URL] = []
-    @State private var webError: String?
-    @State private var selectedDownloadError: String?
-    @State private var isFetchingImage = false
-
-    private enum Phase {
-        case loadingWeb
-        case picking
-    }
-
-    var body: some View {
-        NavigationStack {
-            ZStack {
-                hiddenWebLoader
-                content
-            }
-            .navigationTitle("Images on page")
-#if os(iOS)
-            .navigationBarTitleDisplayMode(.inline)
-#endif
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .overlay {
-                if isFetchingImage {
-                    ZStack {
-                        Color.black.opacity(0.15)
-                        ProgressView("Loading image…")
-                            .padding(24)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    }
-                    .ignoresSafeArea()
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var hiddenWebLoader: some View {
-        PageImageWebView(
-            url: pageURL,
-            onImageURLStrings: { strings in
-                let resolved = URLImageImportHelpers.resolvedHTTPSURLs(strings: strings, baseURL: pageURL)
-                imageURLs = resolved
-                if resolved.isEmpty {
-                    webError = "No images found on this page."
-                    phase = .picking
-                } else {
-                    webError = nil
-                    phase = .picking
-                }
-            },
-            onFailure: { error in
-                webError = error.localizedDescription
-                phase = .picking
-            }
-        )
-        .frame(width: 1, height: 1)
-        .opacity(0.01)
-        .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        switch phase {
-        case .loadingWeb:
-            ContentUnavailableView {
-                Label("Loading page", systemImage: "globe")
-            } description: {
-                Text("Fetching images from the page…")
-            }
-        case .picking:
-            if let webError {
-                ContentUnavailableView {
-                    Label("Couldn’t load images", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(webError)
-                }
-            } else if imageURLs.isEmpty {
-                ContentUnavailableView {
-                    Label("No images", systemImage: "photo")
-                } description: {
-                    Text("No images found on this page.")
-                }
-            } else {
-                ScrollView {
-                    if let selectedDownloadError {
-                        Text(selectedDownloadError)
-                            .font(.caption)
-                            .foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.bottom, 8)
-                    }
-                    LazyVGrid(
-                        columns: [GridItem(.adaptive(minimum: 100), spacing: 8)],
-                        spacing: 8
-                    ) {
-                        ForEach(imageURLs, id: \.self) { imageURL in
-                            Button {
-                                Task { await pick(url: imageURL) }
-                            } label: {
-                                PageImageThumbnail(url: imageURL)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding()
-                }
-            }
-        }
-    }
-
-    private func pick(url: URL) async {
-        selectedDownloadError = nil
-        isFetchingImage = true
-        let result = await URLImageImportService.fetchImageData(from: url)
-        isFetchingImage = false
-        switch result {
-        case .success(let data):
-            guard let cg = ImageProcessing.decodeCGImage(data: data) else {
-                selectedDownloadError = "Couldn’t decode this image."
-                return
-            }
-            let hints = ImportHints(imageData: data, sourcePageURL: url)
-            onImagePicked(cg, hints)
-        case .failure(let err):
-            selectedDownloadError = err.localizedDescription
-        }
-    }
-}
-
-private struct PageImageThumbnail: View {
-    let url: URL
-
-    var body: some View {
-        AsyncImage(url: url) { phase in
-            switch phase {
-            case .empty:
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.15))
-                    ProgressView()
-                }
-                .frame(minWidth: 100, minHeight: 100)
-            case .success(let image):
-                image
-                    .resizable()
-                    .scaledToFill()
-                    .frame(minWidth: 100, minHeight: 100)
-                    .clipped()
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            case .failure:
-                ZStack {
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.secondary.opacity(0.15))
-                    Image(systemName: "photo")
-                        .foregroundStyle(.secondary)
-                }
-                .frame(minWidth: 100, minHeight: 100)
-            @unknown default:
-                EmptyView()
-            }
         }
     }
 }

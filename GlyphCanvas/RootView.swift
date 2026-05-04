@@ -9,6 +9,7 @@ struct RootView: View {
     @StateObject private var library = ArtworkLibrary()
     @StateObject private var navigationHistory = MacNavigationHistory()
     @State private var studioAutoPresentImagePicker = false
+    @State private var scheduledGIFCachePrune = false
 
     var body: some View {
         tabContainer
@@ -19,6 +20,12 @@ struct RootView: View {
             }
             .onChange(of: navigationHistory.studioPath) { old, new in
                 navigationHistory.handleStudioPathChange(from: old, to: new)
+            }
+            .task {
+                guard !scheduledGIFCachePrune else { return }
+                scheduledGIFCachePrune = true
+                try? await Task.sleep(for: .seconds(90))
+                await GIFExportCache.shared.pruneExpired()
             }
             #if os(macOS)
             .onKeyPress(KeyEquivalent("["), phases: .down) { press in

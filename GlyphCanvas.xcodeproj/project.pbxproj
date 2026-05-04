@@ -140,6 +140,7 @@
 			);
 			name = GlyphCanvas;
 			packageProductDependencies = (
+				81D0E7712F92800100F96421 /* WebImagePicker */,
 			);
 			productName = GlyphCanvas;
 			productReference = 806BF6102F91461D002930E6 /* GlyphCanvas.app */;
@@ -227,6 +228,9 @@
 			productRefGroup = 806BF6112F91461D002930E6 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "WebImagePicker" */,
+			);
 			targets = (
 				806BF60F2F91461D002930E6 /* GlyphCanvas */,
 				806BF6202F91461E002930E6 /* GlyphCanvasTests */,
@@ -645,6 +649,21 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "WebImagePicker" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../SwiftUI Web Image Picker/Packages/WebImagePicker";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		81D0E7712F92800100F96421 /* WebImagePicker */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 81D0E7702F92800100F96421 /* XCLocalSwiftPackageReference "WebImagePicker" */;
+			productName = WebImagePicker;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 806BF6082F91461D002930E6 /* Project object */;
 }

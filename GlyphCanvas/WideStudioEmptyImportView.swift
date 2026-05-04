@@ -102,7 +102,9 @@ struct WideStudioEmptyImportView: View {
         }
 #endif
         .sheet(item: $pagePickItem) { item in
-            PageImagesFromWebSheet(pageURL: item.url) { cg, hints in
+            GlyphCanvasWebImagePagePicker(pageURL: item.url) {
+                pagePickItem = nil
+            } onImagePicked: { cg, hints in
                 onImagePicked(cg, hints)
                 pagePickItem = nil
             }

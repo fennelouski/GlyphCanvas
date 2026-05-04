@@ -5,44 +5,49 @@
 
 import SwiftUI
 
+private enum ExportFormatTab: String, CaseIterable, Identifiable, Hashable {
+    case png
+    case gif
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .png: return "PNG"
+        case .gif: return "GIF"
+        }
+    }
+}
+
 struct ArtworkExportSheet: View {
     let manifest: ArtworkManifest
     @Binding var isExporting: Bool
-    /// Called when user picks a preset; caller runs render/save and clears `isExporting`.
-    let onChoose: (ArtworkExportResolution) async -> Void
+    let onChoosePNG: (ArtworkExportResolution) async -> Void
+    let onChooseGIF: (GIFExportConfig) async -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var tab: ExportFormatTab = .png
+    @State private var gifConfig = GIFExportConfig.default()
 
     var body: some View {
         NavigationStack {
             ZStack {
-                List {
-                    Section {
-                        Text("Source: \(manifest.canvasWidth) × \(manifest.canvasHeight) px")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                VStack(spacing: 0) {
+                    Picker("Format", selection: $tab) {
+                        ForEach(ExportFormatTab.allCases) { t in
+                            Text(t.title).tag(t)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
 
-                    Section("Resolution") {
-                        ForEach(ArtworkExportResolution.allCases, id: \.self) { preset in
-                            Button {
-                                Task {
-                                    isExporting = true
-                                    await onChoose(preset)
-                                    isExporting = false
-                                }
-                            } label: {
-                                HStack {
-                                    Text(rowTitle(for: preset))
-                                        .font(.headline)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    Image(systemName: "square.and.arrow.down")
-                                        .foregroundStyle(.secondary)
-                                        .opacity(isExporting ? 0.35 : 1)
-                                }
-                            }
-                            .disabled(isExporting)
+                    Group {
+                        switch tab {
+                        case .png:
+                            pngList
+                        case .gif:
+                            GIFExportPanel(manifest: manifest, config: $gifConfig)
                         }
                     }
                 }
@@ -66,6 +71,51 @@ struct ArtworkExportSheet: View {
                     }
                     .disabled(isExporting)
                 }
+                if tab == .gif {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Export GIF") {
+                            Task {
+                                isExporting = true
+                                await onChooseGIF(gifConfig)
+                                isExporting = false
+                            }
+                        }
+                        .disabled(isExporting)
+                    }
+                }
+            }
+        }
+    }
+
+    private var pngList: some View {
+        List {
+            Section {
+                Text("Source: \(manifest.canvasWidth) × \(manifest.canvasHeight) px")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Resolution") {
+                ForEach(ArtworkExportResolution.allCases, id: \.self) { preset in
+                    Button {
+                        Task {
+                            isExporting = true
+                            await onChoosePNG(preset)
+                            isExporting = false
+                        }
+                    } label: {
+                        HStack {
+                            Text(rowTitle(for: preset))
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "square.and.arrow.down")
+                                .foregroundStyle(.secondary)
+                                .opacity(isExporting ? 0.35 : 1)
+                        }
+                    }
+                    .disabled(isExporting)
+                }
             }
         }
     }
@@ -85,7 +135,8 @@ struct ArtworkExportSheet: View {
             operations: []
         ),
         isExporting: .constant(false),
-        onChoose: { _ in }
+        onChoosePNG: { _ in },
+        onChooseGIF: { _ in }
     )
 }
 #endif

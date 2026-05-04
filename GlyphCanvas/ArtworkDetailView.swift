@@ -58,8 +58,11 @@ struct ArtworkDetailView: View {
                 ArtworkExportSheet(
                     manifest: m,
                     isExporting: $exportInFlight,
-                    onChoose: { resolution in
+                    onChoosePNG: { resolution in
                         await exportArtwork(manifest: m, resolution: resolution)
+                    },
+                    onChooseGIF: { config in
+                        await exportGIF(manifest: m, config: config)
                     }
                 )
             }
@@ -185,6 +188,86 @@ struct ArtworkDetailView: View {
         case .failure(let error):
             await MainActor.run {
                 exportMessage = "Export failed: \(error.localizedDescription)"
+                showExportSheet = false
+            }
+        }
+    }
+
+    private func exportGIF(manifest: ArtworkManifest, config: GIFExportConfig) async {
+        if let cachedURL = await GIFExportCache.shared.lookup(manifest: manifest, config: config),
+           let data = try? Data(contentsOf: cachedURL)
+        {
+            let name = "GlyphCanvas-\(manifest.id.uuidString.prefix(8)).gif"
+            let saveResult = await PNGExportPlatform.saveGIF(data: data, suggestedFilename: name)
+            await MainActor.run {
+                switch saveResult {
+                case .success(let message):
+                    exportMessage = message
+                case .failure(let error):
+                    if error is PNGExportUserCancelled {
+                        exportMessage = nil
+                    } else {
+                        exportMessage = "Save failed: \(error.localizedDescription)"
+                    }
+                }
+                showExportSheet = false
+            }
+            return
+        }
+
+        let framesResult: Result<[CGImage], Error> = await Task.detached {
+            do {
+                let frames = try await GIFExporter.renderFrames(manifest: manifest, config: config)
+                return .success(frames)
+            } catch {
+                return .failure(error)
+            }
+        }.value
+
+        switch framesResult {
+        case .success(let frames):
+            let encoded = await Task.detached {
+                GIFExporter.encodeGIF(
+                    frames: frames,
+                    fps: config.fps,
+                    transparent: config.transparentBackground,
+                    capBytes: config.fileSizeCapBytes
+                )
+            }.value
+            guard let data = encoded else {
+                await MainActor.run {
+                    exportMessage = "Could not encode GIF."
+                    showExportSheet = false
+                }
+                return
+            }
+            do {
+                _ = try await GIFExportCache.shared.store(data: data, manifest: manifest, config: config)
+            } catch {
+                await MainActor.run {
+                    exportMessage = "Cache write failed: \(error.localizedDescription)"
+                    showExportSheet = false
+                }
+                return
+            }
+            let name = "GlyphCanvas-\(manifest.id.uuidString.prefix(8)).gif"
+            let saveResult = await PNGExportPlatform.saveGIF(data: data, suggestedFilename: name)
+            await MainActor.run {
+                switch saveResult {
+                case .success(let message):
+                    exportMessage = message
+                case .failure(let error):
+                    if error is PNGExportUserCancelled {
+                        exportMessage = nil
+                    } else {
+                        exportMessage = "Save failed: \(error.localizedDescription)"
+                    }
+                }
+                showExportSheet = false
+            }
+        case .failure(let error):
+            await MainActor.run {
+                exportMessage = "GIF render failed: \(error.localizedDescription)"
                 showExportSheet = false
             }
         }
