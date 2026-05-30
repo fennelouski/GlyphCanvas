@@ -63,7 +63,7 @@ enum WebImageImportBridge {
 ///
 /// - http + https to match `URLImageImportHelpers`.
 /// - `extractionMode: .webView` for pages that inject images at runtime (replaces the old hidden `WKWebView` scraper).
-/// - `initialURLString` plus `automaticallyLoadOnAppear` so discovery starts immediately with the resolved page URL (no extra “Load page” tap).
+/// - `initialURLString` plus `automaticallyLoadOnAppear` so discovery starts immediately with the resolved page URL (no extra manual load step).
 struct GlyphCanvasWebImagePagePicker: View {
     let pageURL: URL
     var onCancel: () -> Void

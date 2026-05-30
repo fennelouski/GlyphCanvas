@@ -228,11 +228,18 @@ enum ImageProcessing {
         if n == 2 {
             return ([chars[0]], [chars[1]], [chars[1]])
         }
-        let d = n / 3
-        let m = n / 3
-        let dense = Array(chars[0..<d])
-        let medium = Array(chars[d..<(d + m)])
-        let light = Array(chars[(d + m)..<n])
+        // Split into three tiers as evenly as possible. Integer division `n/3` for both
+        // dense and medium leaves the first bucket a singleton for n = 4 or 5, so dark
+        // regions almost always pick the single heaviest stamp (often the longest word).
+        var denseCount = n / 3
+        var mediumCount = n / 3
+        let remainder = n % 3
+        if remainder >= 1 { denseCount += 1 }
+        if remainder >= 2 { mediumCount += 1 }
+        let dense = Array(chars[0..<denseCount])
+        let medium = Array(chars[denseCount..<(denseCount + mediumCount)])
+        let light = Array(chars[(denseCount + mediumCount)..<n])
+        precondition(dense.count + medium.count + light.count == n)
         return (dense, medium, light)
     }
 
@@ -931,8 +938,6 @@ enum ImageProcessing {
 
         context.translateBy(x: 0, y: CGFloat(height))
         context.scaleBy(x: 1, y: -1)
-        // CoreText uses `textMatrix` with the CTM; default can mirror glyphs in a flipped bitmap context.
-        context.textMatrix = .identity
         return context
     }
 
@@ -1004,8 +1009,11 @@ enum ImageProcessing {
         context.saveGState()
         context.translateBy(x: center.x, y: center.y)
         context.rotate(by: glyph.rotationRadians)
+        // Flipped bitmap CTM (scale 1,-1) has determinant −1, which mirrors Core Text output.
+        // An extra horizontal flip restores a proper (orientation-preserving) transform for glyphs.
+        context.scaleBy(x: -1, y: 1)
         context.textMatrix = .identity
-        context.textPosition = CGPoint(x: -bounds.midX, y: -bounds.midY)
+        context.textPosition = CGPoint(x: bounds.midX, y: -bounds.midY)
         CTLineDraw(line, context)
         context.restoreGState()
     }
@@ -1040,8 +1048,9 @@ enum ImageProcessing {
         ctx.saveGState()
         ctx.translateBy(x: cx, y: cy)
         ctx.rotate(by: rotationRadians)
+        ctx.scaleBy(x: -1, y: 1)
         ctx.textMatrix = .identity
-        ctx.textPosition = CGPoint(x: -bounds.midX, y: -bounds.midY)
+        ctx.textPosition = CGPoint(x: bounds.midX, y: -bounds.midY)
         CTLineDraw(line, ctx)
         ctx.restoreGState()
 

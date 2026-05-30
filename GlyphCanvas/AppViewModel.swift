@@ -1446,6 +1446,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
                 score += lambdaRotation * Double(dRot) + lambdaSize * Double(dSize)
             }
 
+            score += GlyphFitness.readabilityRotationPenalty(quantizedDegrees: qDeg)
+
             if score < bestScore {
                 bestScore = score
                 bestCandidate = candidate

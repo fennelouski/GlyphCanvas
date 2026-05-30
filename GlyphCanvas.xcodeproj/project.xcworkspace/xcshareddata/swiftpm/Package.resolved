@@ -1,5 +1,5 @@
 {
-  "originHash" : "9dab2a0045206ed101dd2a7389003c49b8d52ed2855d82c65ff445dba95ce502",
+  "originHash" : "9a695d32851b49908cff3c697d09f7cf0fe86c11b8f552b81a5e755b01d28a0b",
   "pins" : [
     {
       "identity" : "swiftsoup",
@@ -8,6 +8,15 @@
       "state" : {
         "revision" : "6c7915e16f729857aec3e99068c361e58a00ed68",
         "version" : "2.13.4"
+      }
+    },
+    {
+      "identity" : "swiftui-web-image-picker",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/fennelouski/SwiftUI-Web-Image-Picker.git",
+      "state" : {
+        "revision" : "a5475e136dfd853551df8cf86807aeadbdb32a5b",
+        "version" : "1.1.0"
       }
     }
   ],

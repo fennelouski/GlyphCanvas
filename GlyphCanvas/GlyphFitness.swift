@@ -21,6 +21,14 @@ enum GlyphFitness {
     static let lambdaCohesionRotation: Double = 0.0004
     static let lambdaCohesionSize: Double = 0.02
 
+    /// Prefer **upright** (0°) or **quarter-turn** (±90°); mild cost for strong diagonals in between.
+    /// Uses quantized degrees so preferred bearings match cache keys exactly (no `CGFloat` π slop at ±90°).
+    static func readabilityRotationPenalty(quantizedDegrees: Int) -> Double {
+        let a = abs(Double(quantizedDegrees))
+        let distDeg = min(a, abs(a - 90))
+        return lambdaCohesionRotation * (distDeg * .pi / 180)
+    }
+
     static func totalLoss(
         perceptualError: Double,
         genome: GlyphGenome,
@@ -42,10 +50,7 @@ enum GlyphFitness {
         let sizeDrift = abs(fs - referenceAverageFontSize)
         loss += lambdaCohesionSize * Double(sizeDrift)
 
-        let extremeRot = abs(Double(qRad))
-        if extremeRot > .pi / 4 {
-            loss += lambdaCohesionRotation * (extremeRot - .pi / 4)
-        }
+        loss += readabilityRotationPenalty(quantizedDegrees: qDeg)
 
         return loss
     }

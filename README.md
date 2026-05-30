@@ -30,6 +30,14 @@ GlyphCanvas is a SwiftUI app for turning source images into evolving glyph-based
 - Built with Swift and SwiftUI
 - Uses standard Xcode test targets for validation
 
+### WebImagePicker (HTML URL import)
+
+The app depends on [WebImagePicker](https://github.com/fennelouski/SwiftUI-Web-Image-Picker) via Swift Package Manager (currently resolved to **1.1.0** in `Package.resolved`, requirement **Up to Next Major** from 1.1.0). Toolbar actions use SF Symbols with localized accessibility labels; the app targets the package’s public API (`WebImagePicker`, `WebImagePickerConfiguration`, `WebImageSelection`).
+
+HTML pages open `GlyphCanvasWebImagePagePicker`, a thin wrapper around `WebImagePicker(configuration:onCancel:onPick:)` with `automaticallyLoadOnAppear`.
+
+**UI tests:** Query WebImagePicker controls by accessibility label (e.g. `Cancel`, `Done`, `Load page` in English) or by identifier where exposed (`webimage.imageMetadataSearch`, etc.). See `GlyphCanvasUITests/WebImagePickerUIQueries.swift`. Do not match on visible toolbar text.
+
 ## License
 
 No license has been added yet. If you plan to distribute this project, add a license file (for example, MIT, Apache-2.0, or GPL-3.0).

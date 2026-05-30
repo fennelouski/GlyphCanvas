@@ -170,6 +170,102 @@ struct GlyphCanvasTests {
         #expect(lo > hi)
     }
 
+    @Test func fitnessTreatsQuarterTurnAsReadableAsUpright() {
+        let pe = 100.0
+        let upright = GlyphGenome(
+            stamp: "A",
+            fontSize: 10,
+            rotationRadians: 0,
+            colorR: 120,
+            colorG: 120,
+            colorB: 120,
+            offsetX: 0,
+            offsetY: 0,
+            isBold: false
+        )
+        let quarter = GlyphGenome(
+            stamp: "A",
+            fontSize: 10,
+            rotationRadians: .pi / 2,
+            colorR: 120,
+            colorG: 120,
+            colorB: 120,
+            offsetX: 0,
+            offsetY: 0,
+            isBold: false
+        )
+        let negQuarter = GlyphGenome(
+            stamp: "A",
+            fontSize: 10,
+            rotationRadians: -.pi / 2,
+            colorR: 120,
+            colorG: 120,
+            colorB: 120,
+            offsetX: 0,
+            offsetY: 0,
+            isBold: false
+        )
+        let f0 = GlyphFitness.fitness(
+            perceptualError: pe,
+            genome: upright,
+            lastInCell: nil,
+            referenceAverageFontSize: 10
+        )
+        let f90 = GlyphFitness.fitness(
+            perceptualError: pe,
+            genome: quarter,
+            lastInCell: nil,
+            referenceAverageFontSize: 10
+        )
+        let fNeg90 = GlyphFitness.fitness(
+            perceptualError: pe,
+            genome: negQuarter,
+            lastInCell: nil,
+            referenceAverageFontSize: 10
+        )
+        #expect(abs(f0 - f90) < 1e-9)
+        #expect(abs(f0 - fNeg90) < 1e-9)
+    }
+
+    @Test func fitnessPenalizesDiagonalVersusUprightAtSamePerceptualError() {
+        let pe = 100.0
+        let upright = GlyphGenome(
+            stamp: "A",
+            fontSize: 10,
+            rotationRadians: 0,
+            colorR: 120,
+            colorG: 120,
+            colorB: 120,
+            offsetX: 0,
+            offsetY: 0,
+            isBold: false
+        )
+        let diagonal = GlyphGenome(
+            stamp: "A",
+            fontSize: 10,
+            rotationRadians: .pi / 4,
+            colorR: 120,
+            colorG: 120,
+            colorB: 120,
+            offsetX: 0,
+            offsetY: 0,
+            isBold: false
+        )
+        let f0 = GlyphFitness.fitness(
+            perceptualError: pe,
+            genome: upright,
+            lastInCell: nil,
+            referenceAverageFontSize: 10
+        )
+        let f45 = GlyphFitness.fitness(
+            perceptualError: pe,
+            genome: diagonal,
+            lastInCell: nil,
+            referenceAverageFontSize: 10
+        )
+        #expect(f0 > f45)
+    }
+
     @Test func edgeGuidedLossAlignedPrefersInkOnStrongEdges() {
         let n = 16
         let bg = RGBAColor(r: 240, g: 240, b: 240, a: 255)
