@@ -20,6 +20,7 @@ enum GlyphCanvasStorageKey {
     static let debugOptimizationOverlay = "glyphCanvas.debugOptimizationOverlay"
     /// 1...8 where 8 means highest color fidelity (least quantization).
     static let colorFidelity = "glyphCanvas.colorFidelity"
+    static let recentStampSets = "glyphCanvas.recentStampSets"
 
     /// Matches `@AppStorage` default `true` when the key has never been written.
     static func highDetailModeEnabled() -> Bool {
@@ -36,7 +37,7 @@ enum GlyphCanvasStorageKey {
         for key in [
             baseCharacterSet, stampSourceMode, characterCaseMode, highDetailMode, autoArchive,
             showSourceOverlay, optimizationMode, encodingComparisonMode, debugOptimizationOverlay,
-            colorFidelity
+            colorFidelity, recentStampSets
         ] {
             UserDefaults.standard.removeObject(forKey: key)
         }
@@ -44,7 +45,7 @@ enum GlyphCanvasStorageKey {
 }
 
 /// Whether stamps are built from individual characters or from unique words in pasted text.
-enum StampSourceMode: String, CaseIterable, Sendable {
+enum StampSourceMode: String, CaseIterable, Sendable, Codable {
     case characters
     case words
 
@@ -195,6 +196,101 @@ enum StampSetPipeline {
         case .uppercase: return inner.uppercased()
         case .lowercase: return inner.lowercased()
         case .both: return inner
+        }
+    }
+}
+
+struct RecentStampSet: Codable, Equatable, Identifiable, Sendable {
+    let id: String
+    let fingerprint: String
+    let sourceMode: StampSourceMode
+    let rawInput: String
+    let displayLabel: String
+    let stampCount: Int
+    let updatedAt: Date
+}
+
+enum RecentStampSetStore {
+    static let maxItems = 10
+
+    static func decode(from json: String) -> [RecentStampSet] {
+        let trimmed = json.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let data = trimmed.data(using: .utf8) else { return [] }
+        do {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode([RecentStampSet].self, from: data)
+        } catch {
+            return []
+        }
+    }
+
+    static func encode(_ items: [RecentStampSet]) -> String {
+        do {
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(items)
+            return String(data: data, encoding: .utf8) ?? "[]"
+        } catch {
+            return "[]"
+        }
+    }
+
+    static func makeRecent(
+        base: String,
+        mode: CharacterCaseMode,
+        source: StampSourceMode,
+        now: Date = Date()
+    ) -> RecentStampSet? {
+        let trimmed = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard !StampSetPipeline.isEffectivelyEmpty(base: base, mode: mode, source: source) else { return nil }
+        let stamps = StampSetPipeline.activeSet(base: base, mode: mode, source: source)
+        guard !stamps.isEmpty else { return nil }
+        let normalized = normalizedInput(base: base, mode: mode, source: source)
+        let fingerprint = makeFingerprint(normalized: normalized, source: source)
+        return RecentStampSet(
+            id: fingerprint,
+            fingerprint: fingerprint,
+            sourceMode: source,
+            rawInput: base,
+            displayLabel: makeDisplayLabel(stamps: stamps, source: source),
+            stampCount: stamps.count,
+            updatedAt: now
+        )
+    }
+
+    static func upsert(_ recent: RecentStampSet, into existing: [RecentStampSet], limit: Int = maxItems) -> [RecentStampSet] {
+        var out: [RecentStampSet] = [recent]
+        out.reserveCapacity(min(limit, existing.count + 1))
+        for item in existing where item.fingerprint != recent.fingerprint {
+            guard out.count < limit else { break }
+            out.append(item)
+        }
+        return out
+    }
+
+    private static func normalizedInput(base: String, mode: CharacterCaseMode, source: StampSourceMode) -> String {
+        switch source {
+        case .characters:
+            return StampSetPipeline.filteredOrderedUniqueCharacters(from: base, mode: mode).joined(separator: "\u{1F}")
+        case .words:
+            return StampSetPipeline.filteredOrderedUniqueWords(from: base, mode: mode).joined(separator: "\u{1F}")
+        }
+    }
+
+    private static func makeFingerprint(normalized: String, source: StampSourceMode) -> String {
+        "\(source.rawValue)::\(normalized)"
+    }
+
+    private static func makeDisplayLabel(stamps: [String], source: StampSourceMode) -> String {
+        switch source {
+        case .characters:
+            let snippet = stamps.joined().prefix(20)
+            return String(snippet)
+        case .words:
+            let preview = stamps.prefix(4).joined(separator: " ")
+            return preview
         }
     }
 }

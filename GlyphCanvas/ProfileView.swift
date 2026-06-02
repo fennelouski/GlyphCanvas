@@ -17,6 +17,7 @@ struct ProfileView: View {
     @AppStorage(GlyphCanvasStorageKey.optimizationMode) private var storedOptimizationMode = OptimizationMode.greedy.rawValue
     @AppStorage(GlyphCanvasStorageKey.encodingComparisonMode) private var storedEncodingComparisonMode = EncodingComparisonMode.perceptual.rawValue
     @AppStorage(GlyphCanvasStorageKey.debugOptimizationOverlay) private var debugOptimizationOverlay = false
+    @AppStorage(GlyphCanvasStorageKey.recentStampSets) private var storedRecentStampSets = "[]"
 
     @EnvironmentObject private var library: ArtworkLibrary
     @Environment(\.openURL) private var openURL
@@ -178,6 +179,10 @@ struct ProfileView: View {
         )
     }
 
+    private var profileRecentStampSets: [RecentStampSet] {
+        RecentStampSetStore.decode(from: storedRecentStampSets)
+    }
+
     private var settingsHeader: some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: "square.stack.3d.up.fill")
@@ -309,6 +314,10 @@ struct ProfileView: View {
                 stampPresetButtons
             }
 
+            if !profileRecentStampSets.isEmpty {
+                recentStampSetButtons
+            }
+
             Text("Unique stamps: \(profileActiveStampCount)")
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(GalleryTheme.bodyMuted)
@@ -344,6 +353,39 @@ struct ProfileView: View {
             HStack(spacing: 8) {
                 stampPresetButton("Punct", PredefinedStampSets.punctuation)
                 stampPresetButton("Emoji", PredefinedStampSets.emoji)
+            }
+        }
+    }
+
+    private var recentStampSetButtons: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("RECENT STAMP SETS")
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(GalleryTheme.bodyMuted)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(profileRecentStampSets.prefix(6)) { recent in
+                    Button {
+                        storedStampSourceMode = recent.sourceMode.rawValue
+                        storedBaseCharacterSet = recent.rawInput
+                    } label: {
+                        HStack(spacing: 8) {
+                            Text(recent.sourceMode == .words ? "words" : "chars")
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(GalleryTheme.bodyMuted)
+                            Text(recent.displayLabel.isEmpty ? recent.rawInput : recent.displayLabel)
+                                .font(.system(.caption, design: .monospaced))
+                                .lineLimit(1)
+                                .foregroundStyle(GalleryTheme.headline)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text("\(recent.stampCount)")
+                                .font(.system(.caption2, design: .monospaced))
+                                .foregroundStyle(GalleryTheme.bodyMuted)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(GalleryTheme.settingsAccent)
+                }
             }
         }
     }

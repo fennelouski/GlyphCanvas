@@ -84,6 +84,7 @@ final class AppViewModel: ObservableObject {
     @Published var baseCharacterSet: String = GlyphCanvasCharacterSetDefaults.baseString
     @Published var stampSourceMode: StampSourceMode = .characters
     @Published var characterCaseMode: CharacterCaseMode = .both
+    @Published var recentStampSets: [RecentStampSet] = []
 
     /// Filtered, de-duplicated stamps (single characters, emoji, or words) used for glyph sampling.
     /// Character mode: letters filtered by `characterCaseMode`; non-letters kept; internal spaces kept.
@@ -121,9 +122,30 @@ final class AppViewModel: ObservableObject {
 
     private var importTitleRefinementGeneration: UInt = 0
     private var importGeocodeTask: Task<Void, Never>?
+    private var lastEncodingSnapshot: EncodingSessionSnapshot?
 }
 
 extension AppViewModel {
+    func loadRecentStampSets(from json: String) {
+        recentStampSets = RecentStampSetStore.decode(from: json)
+    }
+
+    func encodedRecentStampSetsJSON() -> String {
+        RecentStampSetStore.encode(recentStampSets)
+    }
+
+    func recordCurrentStampSetInRecents(now: Date = Date()) {
+        guard let recent = RecentStampSetStore.makeRecent(
+            base: baseCharacterSet,
+            mode: characterCaseMode,
+            source: stampSourceMode,
+            now: now
+        ) else {
+            return
+        }
+        recentStampSets = RecentStampSetStore.upsert(recent, into: recentStampSets)
+    }
+
     func applyStudioParameterDefaults() {
         regionSize = 12
         iterationsPerSecond = 120
@@ -211,6 +233,7 @@ extension AppViewModel {
                     self.applyStudioPresetFromSettings()
                     self.activeArtworkID = nil
                     self.encodingAutostartSuppressed = false
+                    self.captureEncodingSessionSnapshot()
                     self.attemptEncodingAutostartIfEligible()
                 }
             } catch {
@@ -232,6 +255,7 @@ extension AppViewModel {
     func start() {
         guard !isRunning, engine != nil, playbackIndex == glyphHistory.count else { return }
         encodingAutostartSuppressed = false
+        captureEncodingSessionSnapshot()
         if let library = galleryLibrary {
             performPersistArtworkToLibrary(
                 library: library,
@@ -274,49 +298,22 @@ extension AppViewModel {
 
     func reset() {
         Task {
+            await rebuildCanvasFromSource(applyStudioPreset: true)
+        }
+    }
+
+    /// Smart restart: replays committed history when encoding settings are unchanged; otherwise regenerates from source.
+    func restartAnimation(library: ArtworkLibrary) {
+        Task {
             await pauseAndAwaitTask()
-            do {
-                let src = await MainActor.run { self.sourceImageForOverlay }
-                guard let src else { return }
-                let canvasBG =
-                    (try? ImageProcessing.darkestAmongTopFiveCommonColors(from: src))
-                    ?? RGBAColor(r: 255, g: 255, b: 255, a: 255)
-                try await historyStore.reset(width: src.width, height: src.height, canvasBackground: canvasBG)
-                await MainActor.run {
-                    let encMode = self.encodingComparisonMode
-                    guard let engine = try? GlyphRenderEngine(
-                        target: src,
-                        canvasBackground: canvasBG,
-                        initialEncodingComparisonMode: encMode
-                    ),
-                          let snap = try? engine.snapshot() else {
-                        self.engine = nil
-                        self.displayImage = nil
-                        return
-                    }
-                    self.engine = engine
-                    self.displayImage = snap
-                    self.iterationCount = 0
-                    self.glyphCount = 0
-                    self.glyphHistory = []
-                    self.playbackIndex = 0
-                    self.isPlayingBack = false
-                    self.isStopped = false
-                    self.playbackTask?.cancel()
-                    self.playbackTask = nil
-                    self.scoreEMA = nil
-                    self.referenceError = nil
-                    self.progressEstimate = 0
-                    self.clearOptimizationDebug()
-                    self.applyStudioPresetFromSettings()
-                    self.encodingAutostartSuppressed = false
-                    self.attemptEncodingAutostartIfEligible()
-                }
-            } catch {
-                await MainActor.run {
-                    self.glyphHistory = []
-                    self.playbackIndex = 0
-                }
+            endTimelinePlayback()
+            encodingAutostartSuppressed = false
+
+            let shouldRegenerate = glyphHistory.isEmpty || encodingConfigHasChanged
+            if shouldRegenerate {
+                await rebuildCanvasFromSource(applyStudioPreset: false)
+            } else {
+                await restartTimelinePlayback(library: library)
             }
         }
     }
@@ -468,6 +465,7 @@ extension AppViewModel {
             activeArtworkID = manifest.id
             pendingImportTitlePrefix = manifest.titlePrefix
             applyStudioPresetFromSettings()
+            captureEncodingSessionSnapshot()
         } catch {
             exportMessage = "Could not open artwork: \(error.localizedDescription)"
             sourceImageForOverlay = nil
@@ -742,6 +740,118 @@ private extension AppViewModel {
         }
     }
 
+    var encodingConfigHasChanged: Bool {
+        guard let lastEncodingSnapshot else { return true }
+        return EncodingSessionSnapshot.capture(from: self) != lastEncodingSnapshot
+    }
+
+    func captureEncodingSessionSnapshot() {
+        lastEncodingSnapshot = EncodingSessionSnapshot.capture(from: self)
+    }
+
+    func endTimelinePlayback() {
+        isPlayingBack = false
+        playbackLoops = false
+        playbackTask?.cancel()
+        playbackTask = nil
+    }
+
+    func rebuildCanvasFromSource(applyStudioPreset: Bool) async {
+        await pauseAndAwaitTask()
+        endTimelinePlayback()
+        guard let src = sourceImageForOverlay else { return }
+        do {
+            let canvasBG =
+                (try? ImageProcessing.darkestAmongTopFiveCommonColors(from: src))
+                ?? RGBAColor(r: 255, g: 255, b: 255, a: 255)
+            try await historyStore.reset(width: src.width, height: src.height, canvasBackground: canvasBG)
+            if applyStudioPreset {
+                applyStudioPresetFromSettings()
+            }
+            let encMode = encodingComparisonMode
+            guard let engine = try? GlyphRenderEngine(
+                target: src,
+                canvasBackground: canvasBG,
+                initialEncodingComparisonMode: encMode
+            ),
+                  let snap = try? engine.snapshot() else {
+                self.engine = nil
+                displayImage = nil
+                return
+            }
+            self.engine = engine
+            displayImage = snap
+            iterationCount = 0
+            glyphCount = 0
+            glyphHistory = []
+            playbackIndex = 0
+            isPlayingBack = false
+            isStopped = false
+            playbackTask = nil
+            scoreEMA = nil
+            referenceError = nil
+            progressEstimate = 0
+            measuredIterationsPerSecond = 0
+            clearOptimizationDebug()
+            encodingAutostartSuppressed = false
+            captureEncodingSessionSnapshot()
+            attemptEncodingAutostartIfEligible()
+        } catch {
+            glyphHistory = []
+            playbackIndex = 0
+        }
+    }
+
+    func restartTimelinePlayback(library: ArtworkLibrary) async {
+        guard !glyphHistory.isEmpty else { return }
+        await persistArtworkToLibrary(library: library, userInitiated: false)
+        playbackLoops = false
+        playbackIndex = 0
+        isPlayingBack = true
+        isStopped = false
+        playbackTask = Task { await runPlaybackLoop() }
+        await refreshTimelineDisplay()
+    }
+}
+
+/// Encoding-affecting settings captured when a session starts; used to decide replay vs regenerate on restart.
+struct EncodingSessionSnapshot: Equatable {
+    let stampFingerprint: String
+    let stampSourceMode: StampSourceMode
+    let characterCaseMode: CharacterCaseMode
+    let iterationsPerSecond: Double
+    let averageFontSize: Double
+    let colorFidelity: Double
+    let regionSize: Double
+    let candidateCount: Double
+    let optimizationMode: OptimizationMode
+    let encodingComparisonMode: EncodingComparisonMode
+    let geneticPopulation: Double
+    let geneticGenerations: Double
+    let geneticMaxEvaluations: Double
+
+    @MainActor
+    static func capture(from viewModel: AppViewModel) -> EncodingSessionSnapshot {
+        EncodingSessionSnapshot(
+            stampFingerprint: stampFingerprint(for: viewModel.activeStamps),
+            stampSourceMode: viewModel.stampSourceMode,
+            characterCaseMode: viewModel.characterCaseMode,
+            iterationsPerSecond: viewModel.iterationsPerSecond,
+            averageFontSize: viewModel.averageFontSize,
+            colorFidelity: viewModel.colorFidelity,
+            regionSize: viewModel.regionSize,
+            candidateCount: viewModel.candidateCount,
+            optimizationMode: viewModel.optimizationMode,
+            encodingComparisonMode: viewModel.encodingComparisonMode,
+            geneticPopulation: viewModel.geneticPopulation,
+            geneticGenerations: viewModel.geneticGenerations,
+            geneticMaxEvaluations: viewModel.geneticMaxEvaluations
+        )
+    }
+
+    static func stampFingerprint(for stamps: [String]) -> String {
+        stamps.sorted().joined(separator: "\u{1F}")
+    }
 }
 
 /// Runs entirely off the main thread; hops to `MainActor` only for reading settings and publishing UI state.
@@ -1076,6 +1186,8 @@ final class GlyphRenderEngine: @unchecked Sendable {
     private let explorationUniformRate: Double = 0.08
     /// Blend toward previous cell glyph params.
     private let blendProbability: Double = 0.35
+    /// Constrain random orientation search to keep generated words readable.
+    private let maxReadableRotationRadians: CGFloat = .pi / 6
     /// Penalize large jumps from last committed glyph in this cell.
     private let lambdaRotation: Double = 0.0015
     private let lambdaSize: Double = 0.04
@@ -1379,13 +1491,14 @@ final class GlyphRenderEngine: @unchecked Sendable {
             }
 
             var fs = averageFontSize + CGFloat.random(in: -2...2)
-            var rot = CGFloat.random(in: (-.pi / 2)...(.pi / 2))
+            var rot = CGFloat.random(in: (-maxReadableRotationRadians)...(maxReadableRotationRadians))
 
             if Double.random(in: 0..<1) < blendProbability, let last = cellLastGlyph[primaryCell] {
                 fs = last.fontSize * 0.55 + fs * 0.45
                 let lastRad = CGFloat(last.rotationDegrees) * .pi / 180
                 rot = lastRad * 0.55 + rot * 0.45 + CGFloat.random(in: -0.12...0.12)
             }
+            rot = max(-maxReadableRotationRadians, min(maxReadableRotationRadians, rot))
 
             fs = max(4, ImageProcessing.quantizedFontSize(fs))
             let qDeg = ImageProcessing.quantizedRotationDegrees(rot)

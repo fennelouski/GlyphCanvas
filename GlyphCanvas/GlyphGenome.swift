@@ -9,6 +9,9 @@ import simd
 
 /// Evolvable glyph parameters for a single region. Higher-level fitness is computed externally.
 struct GlyphGenome: Sendable {
+    /// Keep glyphs near upright orientation for word legibility.
+    private static let maxReadableRotationRadians: CGFloat = .pi / 6
+
     /// Single stamp: one character, one emoji, or one word.
     var stamp: String
     var fontSize: CGFloat
@@ -61,7 +64,7 @@ struct GlyphGenome: Sendable {
         let ch = ImageProcessing.randomCoverageAwareStamp(meanLuminanceY: meanLuminanceY, stampPool: stampPool)
         var fs = averageFontSize + CGFloat.random(in: -2...2, using: &rng)
         fs = max(4, fs)
-        let rot = CGFloat.random(in: (-.pi / 2)...(.pi / 2), using: &rng)
+        let rot = CGFloat.random(in: (-maxReadableRotationRadians)...(maxReadableRotationRadians), using: &rng)
         let jitterMax = max(1, min(region.width, region.height) / 4)
         let ox = CGFloat.random(in: -CGFloat(jitterMax)...CGFloat(jitterMax), using: &rng)
         let oy = CGFloat.random(in: -CGFloat(jitterMax)...CGFloat(jitterMax), using: &rng)
@@ -74,7 +77,7 @@ struct GlyphGenome: Sendable {
         return GlyphGenome(
             stamp: ch,
             fontSize: fs,
-            rotationRadians: rot,
+            rotationRadians: clampedReadableRotation(rot),
             colorR: Float(qr),
             colorG: Float(qg),
             colorB: Float(qb),
@@ -103,8 +106,7 @@ struct GlyphGenome: Sendable {
         fontSize = max(4, ImageProcessing.quantizedFontSize(fontSize + dSize))
 
         let dRot = CGFloat.random(in: -0.35...0.35, using: &rng)
-        rotationRadians += dRot
-        rotationRadians = max(-(.pi / 2 + 0.2), min(.pi / 2 + 0.2, rotationRadians))
+        rotationRadians = Self.clampedReadableRotation(rotationRadians + dRot)
 
         colorR = min(255, max(0, colorR + Float.random(in: -22...22, using: &rng)))
         colorG = min(255, max(0, colorG + Float.random(in: -22...22, using: &rng)))
@@ -156,10 +158,11 @@ struct GlyphGenome: Sendable {
         let qr = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, r)).rounded()), step: colorQuantizationStep)
         let qg = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, g)).rounded()), step: colorQuantizationStep)
         let qb = ImageProcessing.quantizeChannel(UInt8(min(255, max(0, bl)).rounded()), step: colorQuantizationStep)
+        let clampedRot = clampedReadableRotation(rot)
         return GlyphGenome(
             stamp: stampParent.stamp,
             fontSize: sizeParent.fontSize,
-            rotationRadians: rot,
+            rotationRadians: clampedRot,
             colorR: Float(qr),
             colorG: Float(qg),
             colorB: Float(qb),
@@ -167,6 +170,10 @@ struct GlyphGenome: Sendable {
             offsetY: oy,
             isBold: Bool.random(using: &rng) ? a.isBold : b.isBold
         )
+    }
+
+    private static func clampedReadableRotation(_ radians: CGFloat) -> CGFloat {
+        max(-maxReadableRotationRadians, min(maxReadableRotationRadians, radians))
     }
 }
 

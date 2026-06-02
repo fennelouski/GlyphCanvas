@@ -84,7 +84,7 @@ enum GIFExporter {
         fps: Int,
         transparent: Bool,
         capBytes: Int,
-        minFrameCount: Int = GIFExportConstraintSolver.minFrames
+        minFrameCount: Int = 6
     ) -> Data? {
         _ = transparent
         guard !frames.isEmpty, fps > 0 else { return nil }

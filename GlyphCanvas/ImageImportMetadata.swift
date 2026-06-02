@@ -6,6 +6,9 @@
 import CoreLocation
 import Foundation
 import ImageIO
+#if canImport(MapKit)
+import MapKit
+#endif
 #if canImport(Photos)
 import Photos
 #endif
@@ -232,31 +235,29 @@ enum ImportTitleBuilder {
 enum ImportGeocoding {
     /// Reverse geocode; returns a locality / administrative area suitable for titles.
     static func placeLabel(for location: CLLocation) async -> String? {
-        await withCheckedContinuation { cont in
-            let geocoder = CLGeocoder()
-            geocoder.reverseGeocodeLocation(location) { placemarks, _ in
-                guard let p = placemarks?.first else {
-                    cont.resume(returning: nil)
-                    return
+        #if canImport(MapKit)
+        if #available(iOS 26.0, macOS 26.0, *) {
+            guard let request = MKReverseGeocodingRequest(location: location) else {
+                return nil
+            }
+            do {
+                let mapItems = try await request.mapItems
+                guard let item = mapItems.first else { return nil }
+                if let full = item.address?.fullAddress, !full.isEmpty {
+                    return full
                 }
-                if let locality = p.locality, !locality.isEmpty {
-                    cont.resume(returning: locality)
-                    return
+                if let short = item.address?.shortAddress, !short.isEmpty {
+                    return short
                 }
-                if let sub = p.subAdministrativeArea, !sub.isEmpty {
-                    cont.resume(returning: sub)
-                    return
+                if let name = item.name, !name.isEmpty {
+                    return name
                 }
-                if let admin = p.administrativeArea, !admin.isEmpty {
-                    cont.resume(returning: admin)
-                    return
-                }
-                if let name = p.name, !name.isEmpty {
-                    cont.resume(returning: name)
-                    return
-                }
-                cont.resume(returning: nil)
+                return nil
+            } catch {
+                return nil
             }
         }
+        #endif
+        return nil
     }
 }

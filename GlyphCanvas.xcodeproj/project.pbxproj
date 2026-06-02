@@ -658,7 +658,7 @@
 			repositoryURL = "https://github.com/fennelouski/SwiftUI-Web-Image-Picker.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 1.1.0;
+				minimumVersion = 1.3.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

@@ -8,7 +8,7 @@ import Foundation
 
 /// User-tunable GIF export parameters. `presetID` is nil or `.custom` when the user has diverged from a named preset.
 struct GIFExportConfig: Sendable, Hashable, Codable {
-    static let encoderFormatVersion = 1
+    nonisolated static let encoderFormatVersion = 1
 
     /// Long-edge pixel target (after aspect-preserving scale).
     var resolution: Int

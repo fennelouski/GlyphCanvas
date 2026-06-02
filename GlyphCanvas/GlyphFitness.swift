@@ -17,16 +17,16 @@ struct GlyphCellPrior: Sendable {
 enum GlyphFitness {
     static let lambdaRotation: Double = 0.0015
     static let lambdaSize: Double = 0.04
-    /// Mild penalty for rotation magnitude and size drift from the global average (cohesion).
-    static let lambdaCohesionRotation: Double = 0.0004
+    /// Mild penalty for size drift from the global average (cohesion).
     static let lambdaCohesionSize: Double = 0.02
+    /// Stronger orientation penalty to keep generated words readable (favor upright text).
+    static let lambdaReadabilityRotation: Double = 0.003
 
-    /// Prefer **upright** (0°) or **quarter-turn** (±90°); mild cost for strong diagonals in between.
-    /// Uses quantized degrees so preferred bearings match cache keys exactly (no `CGFloat` π slop at ±90°).
+    /// Prefer upright glyphs (0°); penalty rises with absolute rotation.
+    /// Uses quantized degrees so orientation scoring aligns with cache-key quantization.
     static func readabilityRotationPenalty(quantizedDegrees: Int) -> Double {
         let a = abs(Double(quantizedDegrees))
-        let distDeg = min(a, abs(a - 90))
-        return lambdaCohesionRotation * (distDeg * .pi / 180)
+        return lambdaReadabilityRotation * (a * .pi / 180)
     }
 
     static func totalLoss(

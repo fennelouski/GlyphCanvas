@@ -160,9 +160,9 @@ enum ImageProcessingError: Error {
 /// Per-region scoring: luminance (Rec. 709 weights on 8-bit RGB) plus chroma residuals `B−Y` and `R−Y`.
 /// Documented weights match the luminance line used for coverage-aware character picking.
 enum PerceptualScoring {
-    static let redWeight: Double = 0.2126
-    static let greenWeight: Double = 0.7152
-    static let blueWeight: Double = 0.0722
+    nonisolated static let redWeight: Double = 0.2126
+    nonisolated static let greenWeight: Double = 0.7152
+    nonisolated static let blueWeight: Double = 0.0722
 
     /// `score = 0.7 * luminanceMSE + 0.3 * chromaMSE` (lower is better).
     static let luminanceTermWeight: Double = 0.7
@@ -807,10 +807,10 @@ enum ImageProcessing {
         let ih = CGFloat(image.height)
         guard iw >= 1, ih >= 1 else { return nil }
 
-        var nx = max(0, min(1, normalizedRect.origin.x))
-        var ny = max(0, min(1, normalizedRect.origin.y))
-        var nw = max(0, min(1 - nx, normalizedRect.size.width))
-        var nh = max(0, min(1 - ny, normalizedRect.size.height))
+        let nx = max(0, min(1, normalizedRect.origin.x))
+        let ny = max(0, min(1, normalizedRect.origin.y))
+        let nw = max(0, min(1 - nx, normalizedRect.size.width))
+        let nh = max(0, min(1 - ny, normalizedRect.size.height))
         guard nw > 0, nh > 0 else { return nil }
 
         // CGImage cropping uses bottom-left origin.
@@ -856,7 +856,7 @@ enum ImageProcessing {
         return downscaled
     }
 
-    static func makePixelBuffer(from image: CGImage) throws -> PixelBuffer {
+    nonisolated static func makePixelBuffer(from image: CGImage) throws -> PixelBuffer {
         let buffer = PixelBuffer(width: image.width, height: image.height)
         guard let context = makeContext(width: image.width, height: image.height, data: buffer.data) else {
             throw ImageProcessingError.contextFailure

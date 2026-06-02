@@ -29,6 +29,7 @@ struct ContentView: View {
     @AppStorage(GlyphCanvasStorageKey.encodingComparisonMode) private var storedEncodingComparisonMode = EncodingComparisonMode.perceptual.rawValue
     @AppStorage(GlyphCanvasStorageKey.debugOptimizationOverlay) private var storedDebugOptimizationOverlay = false
     @AppStorage(GlyphCanvasStorageKey.colorFidelity) private var storedColorFidelity = 8.0
+    @AppStorage(GlyphCanvasStorageKey.recentStampSets) private var storedRecentStampSets = "[]"
 
     @ObservedObject var viewModel: AppViewModel
     @EnvironmentObject private var library: ArtworkLibrary
@@ -70,12 +71,15 @@ struct ContentView: View {
         studioFramedLayout
             .onChange(of: storedBaseCharacterSet) { _, newValue in
                 viewModel.baseCharacterSet = newValue
+                recordAndPersistRecentStampSet()
             }
             .onChange(of: storedStampSourceMode) { _, newValue in
                 viewModel.stampSourceMode = StampSourceMode(rawValue: newValue) ?? .characters
+                recordAndPersistRecentStampSet()
             }
             .onChange(of: storedCharacterCaseMode) { _, newValue in
                 viewModel.characterCaseMode = CharacterCaseMode(rawValue: newValue) ?? .both
+                recordAndPersistRecentStampSet()
             }
             .onChange(of: viewModel.baseCharacterSet) { _, newValue in
                 if newValue != storedBaseCharacterSet {
@@ -91,6 +95,10 @@ struct ContentView: View {
                 if newValue.rawValue != storedCharacterCaseMode {
                     storedCharacterCaseMode = newValue.rawValue
                 }
+                recordAndPersistRecentStampSet()
+            }
+            .onChange(of: viewModel.recentStampSets) { _, _ in
+                persistRecentStampSetsFromViewModel()
             }
     }
 
@@ -191,12 +199,27 @@ struct ContentView: View {
         viewModel.baseCharacterSet = storedBaseCharacterSet
         viewModel.stampSourceMode = StampSourceMode(rawValue: storedStampSourceMode) ?? .characters
         viewModel.characterCaseMode = CharacterCaseMode(rawValue: storedCharacterCaseMode) ?? .both
+        viewModel.loadRecentStampSets(from: storedRecentStampSets)
+        viewModel.recordCurrentStampSetInRecents()
+        persistRecentStampSetsFromViewModel()
         viewModel.showSourceOverlay = storedShowSourceOverlay
         viewModel.optimizationMode = OptimizationMode(rawValue: storedOptimizationMode) ?? .greedy
         viewModel.encodingComparisonMode = EncodingComparisonMode(rawValue: storedEncodingComparisonMode) ?? .perceptual
         viewModel.debugOptimizationOverlay = storedDebugOptimizationOverlay
         viewModel.colorFidelity = max(1.0, min(8.0, storedColorFidelity))
         viewModel.applyStudioPresetFromSettings()
+    }
+
+    private func recordAndPersistRecentStampSet() {
+        viewModel.recordCurrentStampSetInRecents()
+        persistRecentStampSetsFromViewModel()
+    }
+
+    private func persistRecentStampSetsFromViewModel() {
+        let encoded = viewModel.encodedRecentStampSetsJSON()
+        if storedRecentStampSets != encoded {
+            storedRecentStampSets = encoded
+        }
     }
 
     private var caseModeBinding: Binding<CharacterCaseMode> {
@@ -596,6 +619,17 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(!viewModel.isPlayingBack && !viewModel.isRunning)
+
+                Button {
+                    viewModel.restartAnimation(library: library)
+                } label: {
+                    Image(systemName: "arrow.trianglehead.2.counterclockwise")
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.bordered)
+                .disabled(!viewModel.hasLoadedImage)
+                .accessibilityLabel("Restart animation")
+                .accessibilityHint("Replays or regenerates the mosaic depending on whether stamps or encoding settings changed")
             }
         }
     }

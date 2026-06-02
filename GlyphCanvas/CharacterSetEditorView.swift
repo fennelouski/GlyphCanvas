@@ -30,6 +30,8 @@ struct CharacterSetEditorView: View {
                 }
                 .pickerStyle(.segmented)
 
+                recentStampSetsSection
+
                 if stampMode == .words {
                     Text("Paste or type text. Unique words (split on whitespace; punctuation trimmed from edges; contractions keep apostrophes) become stamps.")
                         .font(.caption)
@@ -87,6 +89,25 @@ struct CharacterSetEditorView: View {
     }
 
     @ViewBuilder
+    private var recentStampSetsSection: some View {
+        if !viewModel.recentStampSets.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Recent stamp sets")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                FlowRecentStampSetChips(
+                    items: viewModel.recentStampSets,
+                    onTap: { recent in
+                        storedStampSourceMode = recent.sourceMode.rawValue
+                        storedBaseCharacterSet = recent.rawInput
+                        syncViewModelFromStorage()
+                    }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
     private var presetChips: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Add preset")
@@ -119,6 +140,35 @@ private struct FlowStampPresetChips: View {
             ForEach(Array(items.enumerated()), id: \.offset) { _, pair in
                 Button(pair.0) {
                     onTap(pair.1)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+    }
+}
+
+private struct FlowRecentStampSetChips: View {
+    let items: [RecentStampSet]
+    let onTap: (RecentStampSet) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(items.prefix(6)) { item in
+                Button {
+                    onTap(item)
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(item.sourceMode == .words ? "words" : "chars")
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                        Text(item.displayLabel.isEmpty ? item.rawInput : item.displayLabel)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("\(item.stampCount)")
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)

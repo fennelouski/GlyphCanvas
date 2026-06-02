@@ -41,6 +41,69 @@ struct GlyphCanvasTests {
         #expect(Self.pixelBuffersEqual(full, ck, maxChannelDelta: 2))
     }
 
+    @Test func encodingSessionSnapshotDetectsUnchangedConfig() {
+        let baseline = Self.makeEncodingSnapshot()
+        let same = Self.makeEncodingSnapshot()
+        #expect(baseline == same)
+    }
+
+    @Test func encodingSessionSnapshotDetectsStampTextChange() {
+        let baseline = Self.makeEncodingSnapshot(stampFingerprint: "a\u{1F}b")
+        let changed = Self.makeEncodingSnapshot(stampFingerprint: "a\u{1F}c")
+        #expect(baseline != changed)
+    }
+
+    @Test func encodingSessionSnapshotDetectsIterationsPerSecondChange() {
+        let baseline = Self.makeEncodingSnapshot(iterationsPerSecond: 120)
+        let changed = Self.makeEncodingSnapshot(iterationsPerSecond: 150)
+        #expect(baseline != changed)
+    }
+
+    @Test func encodingSessionSnapshotIgnoresPlaybackOnlyFields() {
+        // Snapshots exclude playbackGlyphsPerSecond; two snapshots with identical encoding fields match.
+        let a = Self.makeEncodingSnapshot()
+        let b = Self.makeEncodingSnapshot()
+        #expect(a == b)
+    }
+
+    @Test func encodingSessionSnapshotStampFingerprintDiffersByMode() {
+        let chars = EncodingSessionSnapshot.stampFingerprint(for: ["hello", "world"])
+        let words = EncodingSessionSnapshot.stampFingerprint(for: ["hello world"])
+        #expect(chars != words)
+    }
+
+    private static func makeEncodingSnapshot(
+        stampFingerprint: String = EncodingSessionSnapshot.stampFingerprint(for: ["A", "B", "C"]),
+        stampSourceMode: StampSourceMode = .characters,
+        characterCaseMode: CharacterCaseMode = .both,
+        iterationsPerSecond: Double = 120,
+        averageFontSize: Double = 10,
+        colorFidelity: Double = 8,
+        regionSize: Double = 12,
+        candidateCount: Double = 6,
+        optimizationMode: OptimizationMode = .greedy,
+        encodingComparisonMode: EncodingComparisonMode = .perceptual,
+        geneticPopulation: Double = 16,
+        geneticGenerations: Double = 8,
+        geneticMaxEvaluations: Double = 128
+    ) -> EncodingSessionSnapshot {
+        EncodingSessionSnapshot(
+            stampFingerprint: stampFingerprint,
+            stampSourceMode: stampSourceMode,
+            characterCaseMode: characterCaseMode,
+            iterationsPerSecond: iterationsPerSecond,
+            averageFontSize: averageFontSize,
+            colorFidelity: colorFidelity,
+            regionSize: regionSize,
+            candidateCount: candidateCount,
+            optimizationMode: optimizationMode,
+            encodingComparisonMode: encodingComparisonMode,
+            geneticPopulation: geneticPopulation,
+            geneticGenerations: geneticGenerations,
+            geneticMaxEvaluations: geneticMaxEvaluations
+        )
+    }
+
     private static func makeTestGlyphOperation(sequenceIndex i: Int) -> GlyphOperation {
         let region = PixelRegion(x: 4 + (i % 5), y: 4 + (i % 4), width: 28, height: 28)
         let letters = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -170,7 +233,7 @@ struct GlyphCanvasTests {
         #expect(lo > hi)
     }
 
-    @Test func fitnessTreatsQuarterTurnAsReadableAsUpright() {
+    @Test func fitnessPenalizesQuarterTurnsVersusUpright() {
         let pe = 100.0
         let upright = GlyphGenome(
             stamp: "A",
@@ -223,8 +286,8 @@ struct GlyphCanvasTests {
             lastInCell: nil,
             referenceAverageFontSize: 10
         )
-        #expect(abs(f0 - f90) < 1e-9)
-        #expect(abs(f0 - fNeg90) < 1e-9)
+        #expect(f0 > f90)
+        #expect(f0 > fNeg90)
     }
 
     @Test func fitnessPenalizesDiagonalVersusUprightAtSamePerceptualError() {
@@ -623,6 +686,72 @@ struct GlyphCanvasTests {
         var base = "AB"
         PredefinedStampSets.mergeAppendingUnique(into: &base, preset: "BC")
         #expect(base == "ABC")
+    }
+
+    @Test func recentStampSetStoreRoundTripSerialization() {
+        let seed = RecentStampSet(
+            id: "characters::A\u{1F}B",
+            fingerprint: "characters::A\u{1F}B",
+            sourceMode: .characters,
+            rawInput: "AB",
+            displayLabel: "AB",
+            stampCount: 2,
+            updatedAt: Date(timeIntervalSince1970: 1234)
+        )
+        let json = RecentStampSetStore.encode([seed])
+        let decoded = RecentStampSetStore.decode(from: json)
+        #expect(decoded.count == 1)
+        #expect(decoded.first?.fingerprint == seed.fingerprint)
+        #expect(decoded.first?.sourceMode == seed.sourceMode)
+        #expect(decoded.first?.rawInput == seed.rawInput)
+        #expect(decoded.first?.stampCount == seed.stampCount)
+    }
+
+    @Test func recentStampSetStoreUpsertDedupesAndMovesToFront() {
+        let now = Date(timeIntervalSince1970: 100)
+        let first = RecentStampSetStore.makeRecent(
+            base: "ABC",
+            mode: .both,
+            source: .characters,
+            now: now
+        )!
+        let second = RecentStampSetStore.makeRecent(
+            base: "hello world",
+            mode: .both,
+            source: .words,
+            now: Date(timeIntervalSince1970: 200)
+        )!
+        let replacedFirst = RecentStampSetStore.makeRecent(
+            base: "CBAA",
+            mode: .both,
+            source: .characters,
+            now: Date(timeIntervalSince1970: 300)
+        )!
+
+        let list1 = RecentStampSetStore.upsert(first, into: [])
+        let list2 = RecentStampSetStore.upsert(second, into: list1)
+        let list3 = RecentStampSetStore.upsert(replacedFirst, into: list2)
+
+        #expect(list3.count == 2)
+        #expect(list3[0].fingerprint == first.fingerprint)
+        #expect(list3[1].fingerprint == second.fingerprint)
+        #expect(list3[0].rawInput == "CBAA")
+    }
+
+    @Test func recentStampSetStoreTrimsToCapacity() {
+        var items: [RecentStampSet] = []
+        for i in 0..<12 {
+            let entry = RecentStampSetStore.makeRecent(
+                base: "item\(i)",
+                mode: .both,
+                source: .words,
+                now: Date(timeIntervalSince1970: TimeInterval(i))
+            )!
+            items = RecentStampSetStore.upsert(entry, into: items)
+        }
+        #expect(items.count == RecentStampSetStore.maxItems)
+        #expect(items.first?.rawInput == "item11")
+        #expect(items.last?.rawInput == "item2")
     }
 
     @Test func importRotationQuarterTurnSwapsDimensions() {

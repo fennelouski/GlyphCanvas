@@ -18,17 +18,17 @@ enum GIFExportSliderID: Sendable, Hashable {
 }
 
 enum GIFExportConstraintSolver {
-    static let minFrames = 6
-    static let minFps = 6
-    static let minResolution = 96
-    static let maxResolution = 1024
-    static let maxFps = 30
-    static let maxFrames = 120
-    static let minEndPercent = 0.01
-    static let maxEndPercent = 1.0
+    nonisolated static let minFrames = 6
+    nonisolated static let minFps = 6
+    nonisolated static let minResolution = 96
+    nonisolated static let maxResolution = 1024
+    nonisolated static let maxFps = 30
+    nonisolated static let maxFrames = 120
+    nonisolated static let minEndPercent = 0.01
+    nonisolated static let maxEndPercent = 1.0
 
     /// Pixel dimensions from manifest aspect ratio and long-edge target.
-    static func pixelDimensions(longEdge: Int, manifest: ArtworkManifest) -> (width: Int, height: Int) {
+    nonisolated static func pixelDimensions(longEdge: Int, manifest: ArtworkManifest) -> (width: Int, height: Int) {
         let w = max(1, manifest.canvasWidth)
         let h = max(1, manifest.canvasHeight)
         let longSrc = max(w, h)

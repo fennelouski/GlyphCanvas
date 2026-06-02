@@ -2,7 +2,7 @@
 //  WebImagePickerUIQueries.swift
 //  GlyphCanvasUITests
 //
-//  WebImagePicker (1.1.0+) shows SF Symbols in the toolbar; XCUI matches accessibility
+//  WebImagePicker (1.3.0+) shows SF Symbols in the toolbar; XCUI matches accessibility
 //  labels (or identifiers), not visible button titles.
 //
 
