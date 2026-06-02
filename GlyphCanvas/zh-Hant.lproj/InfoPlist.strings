@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "當您選擇拍攝新照片作為來源影像時，GlyphCanvas 使用相機。";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas 需要存取您的照片庫，以便您可以選擇來源影像。";
+"NSPhotoLibraryAddUsageDescription" = "當您選擇「匯出」時，GlyphCanvas 可以將匯出的影像儲存到您的照片庫中。";

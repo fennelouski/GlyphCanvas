@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas menggunakan kamera saat Anda memilih untuk mengambil foto baru sebagai gambar sumber.";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas memerlukan akses ke perpustakaan foto Anda sehingga Anda dapat memilih gambar sumber.";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas dapat menyimpan gambar yang diekspor ke perpustakaan foto Anda saat Anda memilih Ekspor.";

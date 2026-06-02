@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas gebruikt de camera wanneer u ervoor kiest een nieuwe foto als bronafbeelding te maken.";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas heeft toegang nodig tot uw fotobibliotheek, zodat u een bronafbeelding kunt kiezen.";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas kan geëxporteerde afbeeldingen opslaan in uw fotobibliotheek als u Exporteren kiest.";

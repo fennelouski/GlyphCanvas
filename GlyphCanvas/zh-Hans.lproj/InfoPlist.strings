@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas 在你选择拍摄新照片作为源图像时会使用相机。";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas 需要访问你的照片图库以便选择源图像。";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas 在你选择导出时可将导出的图像保存到照片图库。";

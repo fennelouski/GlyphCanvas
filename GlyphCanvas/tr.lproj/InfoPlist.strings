@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "Kaynak görüntü olarak yeni bir fotoğraf çekmeyi seçtiğinizde GlyphCanvas kamerayı kullanır.";
+"NSPhotoLibraryUsageDescription" = "Kaynak görseli seçebilmeniz için GlyphCanvas'ın fotoğraf kitaplığınıza erişmesi gerekiyor.";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas, Dışa Aktar'ı seçtiğinizde dışa aktarılan görüntüleri fotoğraf kitaplığınıza kaydedebilir.";

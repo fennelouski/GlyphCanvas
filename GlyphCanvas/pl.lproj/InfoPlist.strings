@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas korzysta z aparatu, gdy zdecydujesz się zrobić nowe zdjęcie jako obraz źródłowy.";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas potrzebuje dostępu do Twojej biblioteki zdjęć, abyś mógł wybrać obraz źródłowy.";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas może zapisać wyeksportowane obrazy w bibliotece zdjęć, jeśli wybierzesz opcję Eksportuj.";

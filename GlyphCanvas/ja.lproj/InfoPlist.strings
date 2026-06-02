@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas は、新しい写真をソース画像として撮影する場合にカメラを使用します。";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas はソース画像を選ぶためにフォトライブラリへのアクセスが必要です。";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas は、書き出し時にエクスポートした画像をフォトライブラリに保存できます。";

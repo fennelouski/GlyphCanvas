@@ -1,0 +1,176 @@
+/*
+ GlyphCanvas localization table.
+*/
+
+".navigationTitle(\"\")" = ".navigationTitle(\"\")";
+"\\(config.fps) fps" = "\\(config.fps) fps";
+"\\(config.frameCount) frames — ~\\(String(format:" = "\\(config.frameCount) frames — ~\\(String(format:";
+"\\(dims.width) × \\(dims.height) px" = "\\(dims.width) × \\(dims.height) px";
+"\\(GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id)), \\(Self.formattedArchiveDate(entry.createdAt))" = "\\(GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id)), \\(Self.formattedArchiveDate(entry.createdAt))";
+"\\(item.stampCount)" = "\\(item.stampCount)";
+"\\(manifest.canvasWidth) × \\(manifest.canvasHeight) px" = "\\(manifest.canvasWidth) × \\(manifest.canvasHeight) px";
+"\\(manifest.operations.count) glyphs" = "\\(manifest.operations.count) glyphs";
+"\\(recent.stampCount)" = "\\(recent.stampCount)";
+"About GlyphCanvas" = "GlyphCanvas ìê°";
+"Add preset" = "ì¬ì  ì¤ì  ì¶ê°";
+"ADD PRESET" = "ì¬ì  ì¤ì  ì¶ê°";
+"ART GALLERY" = "ìí¸ ê°¤ë¬ë¦¬";
+"A–Z" = "A–Z";
+"a–z" = "a–z";
+"BUFFER: \\(bufferEstimateLabel)" = "ë²í¼: \\(bufferEstimateLabel)";
+"BUILD VERSION" = "ë¹ë ë²ì ";
+"Build version v \\(GalleryTheme.marketingVersion) stable" = "Build version v \\(GalleryTheme.marketingVersion) stable";
+"Cancel" = "ì·¨ì";
+"Canvas" = "ìºë²ì¤";
+"Cap: \\(capFormatted)" = "ìµëê°: \\(capFormatted)";
+"CASE FILTER" = "ì¼ì´ì¤ íí°";
+"Case filter" = "ì¼ì´ì¤ íí°";
+"Character set" = "ë¬¸ì ì¸í¸";
+"Characters" = "ìºë¦­í°";
+"Check for updates" = "ìë°ì´í¸ íì¸";
+"CHECK FOR UPDATES" = "ìë°ì´í¸ íì¸";
+"Choose from Library" = "ë¼ì´ë¸ë¬ë¦¬ìì ì í";
+"Close" = "ë«ê¸°";
+"COLLECTED WORKS" = "ìì§ë ìí";
+"Continue editing" = "ê³ì í¸ì§";
+"Continue from here" = "ì¬ê¸°ìì ê³ì";
+"Create new artwork" = "ì ìí ë§ë¤ê¸°";
+"Created \\(manifest.createdAt.formatted(date: .long, time: .shortened))" = "Created \\(manifest.createdAt.formatted(date: .long, time: .shortened))";
+"CT_SPEC_01" = "CT_SPEC_01";
+"CT_SPEC_09" = "CT_SPEC_09";
+"CT_SPEC_10" = "CT_SPEC_10";
+"Custom" = "ë§ì¶¤";
+"Debug — \\(viewModel.optimizationMode == .greedy ?" = "Debug — \\(viewModel.optimizationMode == .greedy ?";
+"Delete" = "ì­ì ";
+"DELETE ALL DATA" = "ëª¨ë  ë°ì´í° ì­ì ";
+"Delete All Data" = "ëª¨ë  ë°ì´í° ì­ì ";
+"Delete all data" = "ëª¨ë  ë°ì´í° ì­ì ";
+"Delete this artwork?" = "ì´ ìì ìíì ì­ì íìê² ìµëê¹?";
+"Done" = "ìë£";
+"Duration (adjusts frame count)" = "ê¸°ê°(íë ì ì ì¡°ì )";
+"Edges" = "ê°ì¥ìë¦¬";
+"Edges mode places ink along outlines instead of matching interior color." = "ê°ì¥ìë¦¬ ëª¨ëë ë´ë¶ ììê³¼ ì¼ì¹íë ëì  ì¤ê³½ì ì ë°ë¼ ìí¬ë¥¼ ë°°ì¹í©ëë¤.";
+"Edit stamps" = "ì¤í¬í í¸ì§";
+"Emoji" = "ì´ëª¨í°ì½";
+"Encoding" = "ì¸ì½ë©";
+"Encoding comparison" = "ì¸ì½ë© ë¹êµ";
+"ENCODING COMPARISON" = "ì¸ì½ë© ë¹êµ";
+"Error" = "ì¤ë¥";
+"Estimated size: \\(estFormatted)" = "ìì í¬ê¸°: \\(estFormatted)";
+"Evolution \\(g) gen · \\(e) eval" = "Evolution \\(g) gen · \\(e) eval";
+"Evolutionary" = "ì§íë¡ ì ";
+"Export" = "ìì¶";
+"Export GIF" = "GIF ë´ë³´ë´ê¸°";
+"Export PNG" = "PNG ë´ë³´ë´ê¸°";
+"Export…" = "Export…";
+"File size cap" = "íì¼ í¬ê¸° ì í";
+"Files" = "íì¼";
+"Fitness (higher better) \\(f, format: .number.precision(.fractionLength(4)))" = "Fitness (higher better) \\(f, format: .number.precision(.fractionLength(4)))";
+"Format" = "íì";
+"Frame rate" = "íë ì ìë";
+"Frames & duration" = "íë ì ë° ì§ì ìê°";
+"GALLERY" = "ê°¤ë¬ë¦¬";
+"Gallery" = "ê°¤ë¬ë¦¬";
+"Genetic" = "ì ì ì ";
+"Glyph \\(min(max(0, viewModel.playbackIndex), cap)) / \\(cap)" = "Glyph \\(min(max(0, viewModel.playbackIndex), cap)) / \\(cap)";
+"Glyphs: \\(viewModel.glyphCount)" = "ê¸ë¦¬í: \\(viewModel.glyphCount)";
+"Greedy" = "ìì¬ ë§ì";
+"https://…" = "https://…";
+"Image URL" = "ì´ë¯¸ì§ URL";
+"Import from URL" = "URLìì ê°ì ¸ì¤ê¸°";
+"Import from URL…" = "Import from URL…";
+"IRREVERSIBLE" = "ëëë¦´ ì ìì";
+"Iterations: \\(viewModel.iterationCount)" = "ë°ë³µ: \\(viewModel.iterationCount)";
+"JULIAN VANCE" = "ì¤ë¦¬ì ë°´ì¤";
+"Load" = "ë¡ë";
+"Load page" = "íì´ì§ ë¡ë";
+"Loss (lower better) \\(loss, format: .number.precision(.fractionLength(4)))" = "Loss (lower better) \\(loss, format: .number.precision(.fractionLength(4)))";
+"masterpiece?" = "ê±¸ì?";
+"Match" = "ê²½ê¸°";
+"mechanical" = "ê¸°ê³ì ì¸";
+"Mechanical Editor" = "ê¸°ê³ í¸ì§ê¸°";
+"MECHANICAL EDITOR" = "ê¸°ê³ í¸ì§ì";
+"Mechanical Editor Industrial Suite copyright 1994 through 2024" = "Mechanical Editor Industrial Suite ì ìê¶ 1994ëë¶í° 2024ëê¹ì§";
+"MECHANICAL EDITOR INDUSTRIAL SUITE © 1994–2024" = "MECHANICAL EDITOR INDUSTRIAL SUITE © 1994–2024";
+"Menu" = "ë©ë´";
+"New archive" = "ì ìì¹´ì´ë¸";
+"NEW MOSAIC" = "ìë¡ì´ ëª¨ìì´í¬";
+"Next" = "ë¤ì";
+"No internet connection. Check Wi‑Fi or cellular, then try again." = "No internet connection. Check Wi‑Fi or cellular, then try again.";
+"No stamps from this input; using defaults." = "ì´ ìë ¥ìë ì¤í¬íê° ììµëë¤. ê¸°ë³¸ê°ì ì¬ì©í©ëë¤.";
+"Nothing to use from this input; falling back to default character set." = "ì´ ìë ¥ììë ì¬ì©í  ê²ì´ ììµëë¤. ê¸°ë³¸ ë¬¸ì ì¸í¸ë¡ ëìê°ëë¤.";
+"Nothing usable in this input; default character set is used." = "ì´ ìë ¥ìë ì¬ì©í  ì ìë ê²ì´ ììµëë¤. ê¸°ë³¸ ë¬¸ì ì§í©ì´ ì¬ì©ë©ëë¤.";
+"OK" = "ììì´";
+"Open" = "ì´ê¸°";
+"OPERATOR ID: #8829-MKIV" = "ì´ìì ID: #8829-MKIV";
+"Operator Julian Vance, ID 8829 MK 4" = "ì´ìì Julian Vance, ID 8829 MK 4";
+"OPTIMIZATION MODE" = "ìµì í ëª¨ë";
+"Optimization mode" = "ìµì í ëª¨ë";
+"PARAMETERS" = "ë§¤ê°ë³ì";
+"Paste" = "ë¶ì¬ë£ê¸°";
+"Paste or type text. Unique words (split on whitespace; punctuation trimmed from edges; contractions keep apostrophes) become stamps." = "íì¤í¸ë¥¼ ë¶ì¬ë£ê±°ë ìë ¥íì¸ì. ê³ ì í ë¨ì´(ê³µë°±ì¼ë¡ ë¶í , ê°ì¥ìë¦¬ìì êµ¬ëì  ì ê±°, ìí¬ì¤í¸ë¡í¼ë¥¼ ì ì§íë ì¶ì½í)ë ì¤í¬íê° ë©ëë¤.";
+"Paste text; unique words become stamps. Whitespace splits tokens; edge punctuation is removed; apostrophes inside words are kept." = "íì¤í¸ ë¶ì¬ë£ê¸°; ëí¹í ë¨ì´ê° ì¤í¬íê° ë©ëë¤. ê³µë°±ì í í°ì ë¶í í©ëë¤. ê°ì¥ìë¦¬ êµ¬ëì ì´ ì ê±°ë©ëë¤. ë¨ì´ ìì ìí¬ì¤í¸ë¡í¼ë ì ì§ë©ëë¤.";
+"PASTE URL" = "URL ë¶ì¬ë£ê¸°";
+"Photos" = "ì¬ì§";
+"Platform / utility" = "íë«í¼/ì í¸ë¦¬í°";
+"Preset" = "íë¦¬ì";
+"Profile" = "íë¡í";
+"Punct" = "êµ¬ëì ";
+"Ready for your first" = "ì²« ë²ì§¸ ì¤ë¹";
+"Recent stamp sets" = "ìµê·¼ ì°í ì¸í¸";
+"RECENT STAMP SETS" = "ìµê·¼ ì°í ì¸í¸";
+"Region \\(r.x),\\(r.y) · \\(r.width)×\\(r.height) px" = "Region \\(r.x),\\(r.y) · \\(r.width)×\\(r.height) px";
+"Resolution" = "í´ìë";
+"Resolution (long edge)" = "í´ìë(ê¸´ ê°ì¥ìë¦¬)";
+"Restart animation" = "ì ëë©ì´ì ë¤ì ìì";
+"Retry" = "ì¬ìë";
+"REVIEW, EXPORT & ADVANCED" = "ê²í , ë´ë³´ë´ê¸° ë° ê³ ê¸";
+"Review, export, and advanced" = "ê²í , ë´ë³´ë´ê¸° ë° ê³ ê¸";
+"Rotate clockwise" = "ìê³ë°©í¥ì¼ë¡ íì ";
+"Rotate counterclockwise" = "ìê³ ë°ë ë°©í¥ì¼ë¡ íì ";
+"Save to gallery" = "ê°¤ë¬ë¦¬ì ì ì¥";
+"Scored \\(n) candidate\\(n == 1 ?" = "Scored \\(n) candidate\\(n == 1 ?";
+"Select from files" = "íì¼ìì ì í";
+"Select from Photos" = "ì¬ì§ìì ì í";
+"Select Image" = "ì´ë¯¸ì§ ì í";
+"SELECT YOUR SOURCE" = "ìì¤ë¥¼ ì ííì¸ì";
+"Set: \\(characterSetSummaryLine)" = "ì¤ì : \\(characterSetSummaryLine)";
+"SETTINGS" = "ì¤ì ";
+"Settings" = "ì¤ì ";
+"SETUP" = "ì¤ì ";
+"Show optimization debug" = "ìµì í ëë²ê·¸ íì";
+"Show source overlay" = "ìì¤ ì¤ë²ë ì´ íì";
+"SOFTWARE UPDATE" = "ìíí¸ì¨ì´ ìë°ì´í¸";
+"Source: \\(manifest.canvasWidth) × \\(manifest.canvasHeight) px" = "Source: \\(manifest.canvasWidth) × \\(manifest.canvasHeight) px";
+"Source: \\(manifest.canvasWidth) × \\(manifest.canvasHeight) px — \\(manifest.operations.count) glyphs" = "Source: \\(manifest.canvasWidth) × \\(manifest.canvasHeight) px — \\(manifest.operations.count) glyphs";
+"Speed: \\(viewModel.measuredIterationsPerSecond, format: .number.precision(.fractionLength(1))) /s" = "ìë: \\(viewModel.measuredIterationsPerSecond, format: .number.precision(.fractionLength(1))) /s";
+"Stamp source" = "ì¤í¬í ìì¤";
+"STAMPS" = "ì°í";
+"Stamps" = "ì°í";
+"Stop" = "ì¤ì§";
+"Studio" = "ì¤íëì¤";
+"STUDIO" = "ì¤íëì¤";
+"STUDIO_SESSION" = "STUDIO_SESSION";
+"Sync data" = "ë°ì´í° ëê¸°í";
+"SYNC DATA" = "ë°ì´í° ëê¸°í";
+"SYSTEM OUTPUT // ARCHIVE" = "ìì¤í ì¶ë ¥ // ìì¹´ì´ë¸";
+"SYSTEM READY" = "ìì¤í ì¤ë¹";
+"Take Photo" = "ì¬ì§ ì°ê¸°";
+"Target: \\(viewModel.iterationsPerSecond, format: .number.precision(.fractionLength(0))) /s" = "ëì: \\(viewModel.iterationsPerSecond, format: .number.precision(.fractionLength(0))) /s";
+"Timeline" = "íìë¼ì¸";
+"Timeline range" = "íìë¼ì¸ ë²ì";
+"Toggle(\"\"" = "Toggle(\"\"";
+"Transparent background" = "í¬ëªí ë°°ê²½";
+"Turn your photos into mechanical masterpieces. Start by uploading an image to see the typewriter effect in action." = "ì¬ì§ì ê¸°ê³ì ì¸ ê±¸ìì¼ë¡ ë°ê¿ë³´ì¸ì. íìê¸° í¨ê³¼ê° ì¤ì ë¡ ìëíë ëª¨ìµì ë³´ë ¤ë©´ ì´ë¯¸ì§ë¥¼ ìë¡ëíë ê²ë¶í° ììíì¸ì.";
+"Unique stamps: \\(profileActiveStampCount)" = "ê³ ì  ì°í: \\(profileActiveStampCount)";
+"Unique stamps: \\(viewModel.activeStamps.count)" = "ê³ ì  ì°í: \\(viewModel.activeStamps.count)";
+"Upload a photo to see it transformed into a unique typewriter-style mosaic. Every character is a brushstroke of digital ink." = "ì¬ì§ì ìë¡ëíì¬ ëí¹í íìê¸° ì¤íì¼ì ëª¨ìì´í¬ë¡ ë³íë ëª¨ìµì íì¸íì¸ì. ëª¨ë  ë¬¸ìë ëì§í¸ ìí¬ì ë¶í°ì¹ìëë¤.";
+"Use first \\(Int((config.endPercent * 100).rounded()))% of glyph timeline" = "Use first \\(Int((config.endPercent * 100).rounded()))% of glyph timeline";
+"V.\\(GalleryTheme.marketingVersion)" = "V.\\(GalleryTheme.marketingVersion)";
+"V.\\(GalleryTheme.marketingVersion)_IND" = "V.\\(GalleryTheme.marketingVersion)_IND";
+"v\\(GalleryTheme.marketingVersion)-STABLE" = "v\\(GalleryTheme.marketingVersion)-STABLE";
+"Visual computations rendered through mechanical character matrices. Stored in high-fidelity charcoal substrate." = "ê¸°ê³ì  ë¬¸ì ë§¤í¸ë¦­ì¤ë¥¼ íµí´ ë ëë§ë ìê°ì  ê³ì°ìëë¤. ê³ íì§ì ì¯ ê¸°ì§ì ì ì¥ë©ëë¤.";
+"We load the address directly first. If it’s a webpage, you can choose an image from the page." = "We load the address directly first. If it’s a webpage, you can choose an image from the page.";
+"Word source text" = "ë¨ì´ ìì¤ íì¤í¸";
+"Words" = "ë¨ì´";
+"Your Canvas is Empty" = "ìºë²ì¤ê° ë¹ì´ ììµëë¤";

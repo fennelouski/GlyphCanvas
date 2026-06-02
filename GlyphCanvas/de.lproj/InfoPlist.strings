@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas verwendet die Kamera, wenn du ein neues Foto als Quellbild aufnimmst.";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas benötigt Zugriff auf deine Mediathek, damit du ein Quellbild auswählen kannst.";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas kann exportierte Bilder in deiner Mediathek speichern, wenn du Exportieren wählst.";

@@ -1,0 +1,4 @@
+/* Localized privacy usage descriptions */
+"NSCameraUsageDescription" = "GlyphCanvas використовує камеру, коли ви вирішуєте зробити нову фотографію як вихідне зображення.";
+"NSPhotoLibraryUsageDescription" = "GlyphCanvas needs access to your photo library so you can pick a source image.";
+"NSPhotoLibraryAddUsageDescription" = "GlyphCanvas може зберігати експортовані зображення у вашій бібліотеці фотографій, коли ви вибираєте «Експорт».";
