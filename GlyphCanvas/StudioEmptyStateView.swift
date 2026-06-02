@@ -18,10 +18,10 @@ struct StudioEmptyStateView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 24) {
+                selectSourceSection
                 heroSection
                 headlineBlock
                 bodyCopy
-                selectSourceSection
                 secondaryActionsRow
             }
             .padding(.horizontal, 4)

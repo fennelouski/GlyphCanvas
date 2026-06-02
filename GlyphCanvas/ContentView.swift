@@ -293,7 +293,6 @@ struct ContentView: View {
     private var emptyStudioSelectImageLayout: some View {
         ScrollView {
             VStack(spacing: 14) {
-                studioSetupPanel
                 Group {
 #if os(macOS)
                     WideStudioEmptyImportView(
@@ -332,6 +331,7 @@ struct ContentView: View {
                     }
 #endif
                 }
+                studioSetupPanel
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

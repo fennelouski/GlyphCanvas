@@ -36,17 +36,15 @@ struct WideStudioEmptyImportView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
+        VStack(spacing: 20) {
             HStack(alignment: .center, spacing: 16) {
                 largePhotosButton
                 largeFilesButton
             }
             .padding(.horizontal, 4)
-            Spacer(minLength: 20)
             urlImportBar
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .onChange(of: photosPickerItem) { _, newValue in
             consumePhotosItem(newValue) {
                 photosPickerItem = nil
