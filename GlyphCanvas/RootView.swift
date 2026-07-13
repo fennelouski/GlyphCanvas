@@ -48,7 +48,6 @@ struct RootView: View {
             SettingsTabRoot()
         }
         .tint(GalleryTheme.accent)
-        .preferredColorScheme(.dark)
     }
 }
 
