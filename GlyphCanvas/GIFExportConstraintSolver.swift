@@ -14,7 +14,20 @@ enum GIFExportSliderID: Sendable, Hashable {
     case fileSizeCap
     case endPercent
     case transparent
+    case aspect
     case preset
+}
+
+/// Output frame geometry: the pixel canvas to render into, plus the uniform scale and
+/// centering translation that map source-canvas glyph coordinates into that frame.
+/// For `.source` aspect the offsets are zero; for fixed ratios (portrait 9:16) the artwork is
+/// fit-inside and centered, leaving background-filled letterbox / pillarbox bars.
+struct GIFRenderGeometry: Sendable, Hashable {
+    var width: Int
+    var height: Int
+    var scale: CGFloat
+    var offsetX: CGFloat
+    var offsetY: CGFloat
 }
 
 enum GIFExportConstraintSolver {
@@ -39,6 +52,52 @@ enum GIFExportConstraintSolver {
         return (tw, th)
     }
 
+    /// Full output geometry for a config, honoring `config.aspect`.
+    /// `.source` keeps the artwork's aspect ratio; a fixed ratio (portrait 9:16) fits the artwork
+    /// inside a ratio-shaped frame, centered, so the encoder's background fills the letterbox bars.
+    nonisolated static func renderGeometry(config: GIFExportConfig, manifest: ArtworkManifest) -> GIFRenderGeometry {
+        let srcW = CGFloat(max(1, manifest.canvasWidth))
+        let srcH = CGFloat(max(1, manifest.canvasHeight))
+        let le = CGFloat(max(minResolution, min(config.resolution, maxResolution)))
+
+        guard let ratio = config.aspect.ratio else {
+            // Match artwork: uniform long-edge scale, no letterboxing.
+            let longSrc = max(srcW, srcH)
+            let s = le / longSrc
+            let tw = max(1, Int((srcW * s).rounded()))
+            let th = max(1, Int((srcH * s).rounded()))
+            return GIFRenderGeometry(width: tw, height: th, scale: s, offsetX: 0, offsetY: 0)
+        }
+
+        // Fixed ratio. `resolution` (long edge) drives the taller edge for portrait, else the wider.
+        let rw = CGFloat(max(1, ratio.w))
+        let rh = CGFloat(max(1, ratio.h))
+        let frameW: CGFloat
+        let frameH: CGFloat
+        if rh >= rw {
+            frameH = le
+            frameW = (le * rw / rh).rounded()
+        } else {
+            frameW = le
+            frameH = (le * rh / rw).rounded()
+        }
+        let fw = max(1, frameW)
+        let fh = max(1, frameH)
+        // Fit-inside so the whole artwork is visible; center it, leaving background bars.
+        let fit = min(fw / srcW, fh / srcH)
+        let contentW = srcW * fit
+        let contentH = srcH * fit
+        let dx = (fw - contentW) / 2
+        let dy = (fh - contentH) / 2
+        return GIFRenderGeometry(
+            width: max(1, Int(fw.rounded())),
+            height: max(1, Int(fh.rounded())),
+            scale: fit,
+            offsetX: dx,
+            offsetY: dy
+        )
+    }
+
     /// Heuristic encoded size for UI feedback (actual GIF may differ; encoder enforces cap).
     static func estimateBytes(
         resolution: Int,
@@ -53,12 +112,11 @@ enum GIFExportConstraintSolver {
     }
 
     static func estimateBytes(config: GIFExportConfig, manifest: ArtworkManifest) -> Int {
-        estimateBytes(
-            resolution: config.resolution,
-            frameCount: config.frameCount,
-            transparent: config.transparentBackground,
-            manifest: manifest
-        )
+        // Use the true output frame (which may be letterboxed to a fixed aspect), not the source aspect.
+        let g = renderGeometry(config: config, manifest: manifest)
+        let bpp = config.transparentBackground ? 0.55 : 0.45
+        let body = Double(config.frameCount) * Double(g.width * g.height) * bpp
+        return Int(body.rounded()) + 2048
     }
 
     /// When predicted size exceeds `fileSizeCapBytes`, shrink in order: frames → fps → resolution,
@@ -118,7 +176,7 @@ enum GIFExportConstraintSolver {
         if let pid = c.presetID, lastChanged != .preset {
             let r = pid.recommended
             if r.resolution != c.resolution || r.fps != c.fps || r.frameCount != c.frameCount
-                || r.fileSizeCapBytes != c.fileSizeCapBytes
+                || r.fileSizeCapBytes != c.fileSizeCapBytes || r.aspect != c.aspect
             {
                 c.presetID = nil
             }

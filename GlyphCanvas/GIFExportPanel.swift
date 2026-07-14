@@ -41,6 +41,22 @@ struct GIFExportPanel: View {
                 }
             }
 
+            Section("Orientation") {
+                Picker("Aspect / orientation", selection: Binding(
+                    get: { config.aspect },
+                    set: { applyAspect($0) }
+                )) {
+                    ForEach(GIFExportAspect.allCases) { a in
+                        Text(a.displayName).tag(a)
+                    }
+                }
+                if config.aspect.isPortrait {
+                    Text("Artwork is fit inside a portrait 9:16 frame and centered; the background fills the top/bottom bars.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section("Resolution (long edge)") {
                 Slider(
                     value: Binding(
@@ -56,8 +72,8 @@ struct GIFExportPanel: View {
                     in: Double(GIFExportConstraintSolver.minResolution)...Double(GIFExportConstraintSolver.maxResolution),
                     step: 8
                 )
-                let dims = GIFExportConstraintSolver.pixelDimensions(longEdge: config.resolution, manifest: manifest)
-                Text("\(dims.width) × \(dims.height) px")
+                let geo = GIFExportConstraintSolver.renderGeometry(config: config, manifest: manifest)
+                Text("\(geo.width) × \(geo.height) px")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -106,17 +122,23 @@ struct GIFExportPanel: View {
                 Slider(
                     value: Binding(
                         get: { config.duration },
-                        set: { newDur in
-                            var c = config
-                            c.presetID = nil
-                            c.frameCount = GIFExportConstraintSolver.frameCount(forDuration: newDur, fps: c.fps)
-                            c = GIFExportConstraintSolver.rebalance(config: c, lastChanged: .duration, manifest: manifest)
-                            config = c
-                        }
+                        set: { newDur in setDuration(newDur) }
                     ),
                     in: minDur...maxDur
                 )
-                Text("Duration (adjusts frame count)")
+
+                Stepper(
+                    value: Binding(
+                        get: { config.duration },
+                        set: { newDur in setDuration(newDur) }
+                    ),
+                    in: minDur...maxDur,
+                    step: 0.5
+                ) {
+                    Text("Length: \(String(format: "%.1f", config.duration)) s")
+                        .font(.caption.monospacedDigit())
+                }
+                Text("Length in seconds (adjusts frame count at current fps)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -186,6 +208,22 @@ struct GIFExportPanel: View {
         }
     }
 
+    private func setDuration(_ newDur: Double) {
+        var c = config
+        c.presetID = nil
+        c.frameCount = GIFExportConstraintSolver.frameCount(forDuration: newDur, fps: c.fps)
+        c = GIFExportConstraintSolver.rebalance(config: c, lastChanged: .duration, manifest: manifest)
+        config = c
+    }
+
+    private func applyAspect(_ aspect: GIFExportAspect) {
+        var c = config
+        c.presetID = nil
+        c.aspect = aspect
+        c = GIFExportConstraintSolver.rebalance(config: c, lastChanged: .aspect, manifest: manifest)
+        config = c
+    }
+
     private func applyPreset(_ preset: GIFExportPreset?) {
         guard let preset else {
             config.presetID = nil
@@ -197,6 +235,7 @@ struct GIFExportPanel: View {
         c.fps = r.fps
         c.frameCount = r.frameCount
         c.fileSizeCapBytes = r.fileSizeCapBytes
+        c.aspect = r.aspect
         c.presetID = preset
         c = GIFExportConstraintSolver.rebalance(config: c, lastChanged: .preset, manifest: manifest)
         config = c

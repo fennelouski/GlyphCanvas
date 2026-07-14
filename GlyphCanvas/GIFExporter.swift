@@ -46,13 +46,16 @@ enum GIFExporter {
         config: GIFExportConfig,
         progress: (@Sendable (Int, Int) -> Void)? = nil
     ) async throws -> [CGImage] {
-        let (tw, th) = targetSize(manifest: manifest, longEdge: config.resolution)
-        let s = scaleFactor(manifest: manifest, longEdge: config.resolution)
+        let geo = GIFExportConstraintSolver.renderGeometry(config: config, manifest: manifest)
+        let tw = geo.width
+        let th = geo.height
+        let s = geo.scale
         let ops: [GlyphOperation]
-        if abs(s - 1.0) < 0.000_1 {
+        // Only skip the transform when it is an exact identity (source aspect, no scale, no offset).
+        if abs(s - 1.0) < 0.000_1, abs(geo.offsetX) < 0.000_1, abs(geo.offsetY) < 0.000_1 {
             ops = manifest.operations
         } else {
-            ops = manifest.operations.map { scaledOperation($0, scale: s) }
+            ops = manifest.operations.map { scaledOperation($0, scale: s, offsetX: geo.offsetX, offsetY: geo.offsetY) }
         }
         let totalOps = ops.count
         let indices = sampleIndices(
@@ -131,9 +134,14 @@ enum GIFExporter {
         return data as Data
     }
 
-    nonisolated private static func scaledOperation(_ op: GlyphOperation, scale: CGFloat) -> GlyphOperation {
-        let px = op.position.x * scale
-        let py = op.position.y * scale
+    nonisolated private static func scaledOperation(
+        _ op: GlyphOperation,
+        scale: CGFloat,
+        offsetX: CGFloat = 0,
+        offsetY: CGFloat = 0
+    ) -> GlyphOperation {
+        let px = op.position.x * scale + offsetX
+        let py = op.position.y * scale + offsetY
         let rx = Int(floor(px))
         let ry = Int(floor(py))
         let region = PixelRegion(x: rx, y: ry, width: 0, height: 0)

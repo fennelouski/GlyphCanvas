@@ -18,6 +18,9 @@ struct GIFExportConfig: Sendable, Hashable, Codable {
     /// Fraction of the full operation timeline to include, from 0% up to this value (0.01…1.0).
     var endPercent: Double
     var transparentBackground: Bool
+    /// Output orientation / aspect ratio. `.source` matches the artwork; fixed ratios (e.g. portrait
+    /// 9:16 for TikTok / Reels) letterbox/pillarbox the artwork into that shape.
+    var aspect: GIFExportAspect
     /// When user picks a platform preset; `nil` means treat as custom / legacy.
     var presetID: GIFExportPreset?
 
@@ -35,6 +38,7 @@ struct GIFExportConfig: Sendable, Hashable, Codable {
             fileSizeCapBytes: p.fileSizeCapBytes,
             endPercent: 1.0,
             transparentBackground: false,
+            aspect: p.aspect,
             presetID: .webEmbed
         )
     }
@@ -57,6 +61,7 @@ struct GIFExportConfig: Sendable, Hashable, Codable {
             "\(fileSizeCapBytes)",
             String(format: "%.6f", endPercent),
             transparentBackground ? "1" : "0",
+            aspect.rawValue,
             presetRaw,
         ].joined(separator: "|")
 
