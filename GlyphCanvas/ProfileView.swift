@@ -2,7 +2,7 @@
 //  ProfileView.swift
 //  GlyphCanvas
 //
-//  Mechanical Editor settings: preferences, encoding, system, legal, and local data.
+//  Glyph Canvas settings: preferences, encoding, system, legal, and local data.
 //
 
 import SwiftUI
@@ -27,22 +27,162 @@ struct ProfileView: View {
     @State private var showAlert = false
     @State private var showDeleteConfirmation = false
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .body) private var presetMinimumWidth = 140.0
+    @State private var selectedSection: SettingsSection = .preferences
+    @State private var showsCompactDetail = false
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Settings")
-                    .font(.caption)
-                    .foregroundStyle(Color.clear)
-                    .frame(height: 1)
-                    .accessibilityHeading(.h1)
+        adaptiveLayout(compactDetail: false)
+            .tint(settingsAccent)
+            .navigationDestination(isPresented: $showsCompactDetail) {
+                adaptiveLayout(compactDetail: true)
+                    .tint(settingsAccent)
+            }
 
+    }
+
+    private func adaptiveLayout(compactDetail: Bool) -> some View {
+        GeometryReader { geometry in
+            let isWide = geometry.size.width >= (dynamicTypeSize.isAccessibilitySize ? 1040 : 760)
+            Group {
+                if isWide {
+                    HStack(spacing: 0) {
+                        sectionSidebar
+                            .frame(width: dynamicTypeSize.isAccessibilitySize ? 460 : 240)
+                        Divider()
+                        sectionForm
+                            .frame(maxWidth: 740)
+                            .frame(maxWidth: .infinity)
+                    }
+                } else if compactDetail {
+                    sectionForm
+                } else {
+                    sectionHub
+                }
+            }
+            .background(settingsBackground)
+            .navigationTitle(compactDetail && !isWide ? selectedSection.title : "Settings")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
+            .onChange(of: isWide) { oldValue, newValue in
+                if !compactDetail && oldValue && !newValue {
+                    showsCompactDetail = true
+                }
+            }
+        }
+            .alert(alertTitle, isPresented: visiblePresentation($showAlert, compactDetail: compactDetail)) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(alertMessage)
+            }
+            .confirmationDialog(
+                "Delete all saved artworks and reset GlyphCanvas settings on this device?",
+                isPresented: visiblePresentation($showDeleteConfirmation, compactDetail: compactDetail),
+                titleVisibility: .visible
+            ) {
+                Button("Delete All Data", role: .destructive) {
+                    performDeleteAllData()
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+    }
+
+    private func visiblePresentation(_ isPresented: Binding<Bool>, compactDetail: Bool) -> Binding<Bool> {
+        Binding(
+            get: { compactDetail == showsCompactDetail && isPresented.wrappedValue },
+            set: { value in
+                if compactDetail == showsCompactDetail { isPresented.wrappedValue = value }
+            }
+        )
+    }
+
+    private var settingsAccent: Color {
+        colorScheme == .dark ? GalleryTheme.settingsAccent : Color(red: 0.15, green: 0.38, blue: 0.67)
+    }
+
+    private var settingsBackground: some View {
+        LinearGradient(
+            colors: [settingsAccent.opacity(0.09), GalleryTheme.settingsScreenBackground],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .background(GalleryTheme.settingsScreenBackground)
+    }
+
+    private var sectionSidebar: some View {
+        List(selection: Binding<SettingsSection?>(
+            get: { selectedSection },
+            set: { if let section = $0 { selectedSection = section } }
+        )) {
+            settingsHeader
+                .listRowBackground(Color.clear)
+            ForEach(SettingsSection.allCases) { section in
+                sectionLabel(section, isSelected: selectedSection == section)
+                    .tag(section)
+                    .accessibilityIdentifier("settings.section.\(section.rawValue)")
+            }
+        }
+        .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
+    }
+
+    private var sectionHub: some View {
+        List {
+            Section {
+                ForEach(SettingsSection.allCases) { section in
+                    Button {
+                        selectedSection = section
+                        showsCompactDetail = true
+                    } label: {
+                        HStack {
+                            sectionLabel(section)
+                            Spacer(minLength: 12)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings.section.\(section.rawValue)")
+                }
+            } header: {
                 settingsHeader
+            }
+        }
+        .scrollContentBackground(.hidden)
+    }
 
-                operatorCard
+    private func sectionLabel(_ section: SettingsSection, isSelected: Bool = false) -> some View {
+        let selectedForeground = colorScheme == .dark ? GalleryTheme.onAccentFill : Color.white
+        return
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(section.title)
+                    .font(.headline)
+                    .foregroundStyle(isSelected ? selectedForeground : GalleryTheme.headline)
+                Text(section.subtitle)
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? selectedForeground : GalleryTheme.bodyMuted)
+            }
+            .padding(.vertical, 6)
+        } icon: {
+            Image(systemName: section.symbol)
+                .foregroundStyle(isSelected ? selectedForeground : (section == .critical ? GalleryTheme.settingsDanger : settingsAccent))
+                .fixedSize()
+                .accessibilityHidden(true)
+        }
+    }
 
-                SettingsSectionHeader(title: "PREFERENCES", dotColor: GalleryTheme.settingsAccent)
-                    .accessibilityAddTraits(.isHeader)
-                VStack(spacing: 12) {
+    private var sectionForm: some View {
+        Form {
+            switch selectedSection {
+            case .preferences:
+                Section("Mosaics") {
                     SettingsToggleRow(
                         title: "High Detail Mode",
                         subtitle: "Increases character density in mosaics. Consumes more processing power.",
@@ -54,81 +194,73 @@ struct ProfileView: View {
                         isOn: $autoArchive
                     )
                 }
-
-                SettingsSectionHeader(title: "ENCODING", dotColor: GalleryTheme.settingsAccent)
-                    .accessibilityAddTraits(.isHeader)
-                VStack(spacing: 12) {
+                Section("On this device") {
+                    Button("Reload gallery", systemImage: "arrow.triangle.2.circlepath") {
+                        syncGalleryFromDisk()
+                    }
+                    .accessibilityHint("Reloads the gallery list from files saved on this device")
+                }
+            case .encoding:
+                Section("Active stamps") {
+                    stampPreview
                     characterSetCard
                     caseFilterCard
+                }
+                Section("Encoding") {
+                    optimizationModeCard
+                    encodingComparisonModeCard
                     SettingsToggleRow(
                         title: "Show Source Overlay",
                         subtitle: "When a source image is loaded, blends the original under the mosaic preview in Studio.",
                         isOn: $showSourceOverlay
                     )
-                    optimizationModeCard
-                    encodingComparisonModeCard
                     SettingsToggleRow(
                         title: "Optimization Debug",
                         subtitle: "Shows technical loss and region details while encoding (advanced).",
                         isOn: $debugOptimizationOverlay
                     )
                 }
-
-                SettingsSectionHeader(title: "SYSTEM INFO", dotColor: GalleryTheme.settingsAccent)
-                    .accessibilityAddTraits(.isHeader)
-                VStack(spacing: 12) {
+            case .system:
+                Section("System info") {
                     buildVersionCard
                     softwareUpdateCard
                 }
-
-                SettingsSectionHeader(title: "CRITICAL ACTIONS", dotColor: GalleryTheme.settingsDanger)
-                    .accessibilityAddTraits(.isHeader)
-                VStack(spacing: 12) {
-                    SettingsLinkRow(
-                        icon: "shield.lefthalf.filled",
-                        title: "Privacy Policy",
-                        accessibilityHint: "Opens in Safari"
-                    ) {
+            case .critical:
+                Section("Legal") {
+                    SettingsLinkRow(icon: "shield.lefthalf.filled", title: "Privacy Policy") {
                         openBundledURL(infoPlistKey: "GlyphCanvasPrivacyPolicyURL", missingLabel: "Privacy Policy")
                     }
-                    SettingsLinkRow(
-                        icon: "doc.text",
-                        title: "Terms of Service",
-                        accessibilityHint: "Opens in Safari"
-                    ) {
+                    SettingsLinkRow(icon: "doc.text", title: "Terms of Service") {
                         openBundledURL(infoPlistKey: "GlyphCanvasTermsURL", missingLabel: "Terms of Service")
                     }
-                    deleteDataRow
                 }
+                Section {
+                    deleteDataRow
+                } header: {
+                    Text("Local data")
+                } footer: {
+                    Text("Permanently removes saved artworks and resets app settings on this device. This cannot be undone.")
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .accessibilityIdentifier("settings.detail.\(selectedSection.rawValue)")
+    }
 
-                footerText
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-            .padding(.bottom, 28)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private var stampPreview: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(profileActiveStamps.prefix(16).joined(separator: "   "))
+                .font(.system(.title2, design: .monospaced).weight(.medium))
+                .foregroundStyle(settingsAccent)
+                .lineLimit(4)
+                .accessibilityLabel("Stamp preview")
+                .accessibilityValue(profileActiveStamps.prefix(16).joined(separator: ", "))
+            Text("\(profileActiveStampCount) unique stamps")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(GalleryTheme.bodyMuted)
         }
-        .background(GalleryTheme.settingsScreenBackground)
-        #if os(iOS)
-        .toolbar(.hidden, for: .navigationBar)
-        #else
-        .navigationTitle("")
-        #endif
-        .alert(alertTitle, isPresented: $showAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(alertMessage)
-        }
-        .confirmationDialog(
-            "Delete all saved artworks and reset GlyphCanvas settings on this device?",
-            isPresented: $showDeleteConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button("Delete All Data", role: .destructive) {
-                performDeleteAllData()
-            }
-            Button("Cancel", role: .cancel) {}
-        }
+        .padding(.vertical, 8)
     }
 
     private var caseModeSettingsBinding: Binding<CharacterCaseMode> {
@@ -163,13 +295,15 @@ struct ProfileView: View {
         StampSourceMode(rawValue: storedStampSourceMode) ?? .characters
     }
 
-    private var profileActiveStampCount: Int {
+    private var profileActiveStamps: [String] {
         StampSetPipeline.activeSet(
             base: storedBaseCharacterSet,
             mode: CharacterCaseMode(rawValue: storedCharacterCaseMode) ?? .both,
             source: profileStampMode
-        ).count
+        )
     }
+
+    private var profileActiveStampCount: Int { profileActiveStamps.count }
 
     private var profileShowsStampFallback: Bool {
         StampSetPipeline.isEffectivelyEmpty(
@@ -187,13 +321,13 @@ struct ProfileView: View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: "square.stack.3d.up.fill")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(GalleryTheme.settingsAccent)
+                .foregroundStyle(settingsAccent)
                 .accessibilityHidden(true)
 
-            Text("MECHANICAL EDITOR")
+            Text("GLYPH CANVAS")
                 .font(.system(.subheadline, design: .monospaced).weight(.heavy))
                 .tracking(0.8)
-                .foregroundStyle(GalleryTheme.settingsAccent)
+                .foregroundStyle(settingsAccent)
 
             Spacer(minLength: 0)
 
@@ -204,85 +338,16 @@ struct ProfileView: View {
         }
         .padding(.bottom, 4)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Mechanical Editor")
-    }
-
-    private var operatorCard: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(GalleryTheme.settingsCardSurface)
-                    .frame(width: 72, height: 72)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .font(.system(size: 36))
-                            .foregroundStyle(GalleryTheme.bodyMuted)
-                            .accessibilityHidden(true)
-                    }
-
-                Image(systemName: "pencil.circle.fill")
-                    .font(.system(size: 22))
-                    .symbolRenderingMode(.palette)
-                    .foregroundStyle(GalleryTheme.settingsAccent, GalleryTheme.settingsCardSurface)
-                    .offset(x: 4, y: 4)
-                    .accessibilityHidden(true)
-            }
-            .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("JULIAN VANCE")
-                    .font(.system(.body, design: .monospaced).weight(.bold))
-                    .foregroundStyle(GalleryTheme.headline)
-
-                Text("OPERATOR ID: #8829-MKIV")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(GalleryTheme.bodyMuted)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button {
-                syncGalleryFromDisk()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 13, weight: .semibold))
-                        .accessibilityHidden(true)
-                    Text("SYNC DATA")
-                        .font(.system(.caption2, design: .monospaced).weight(.heavy))
-                }
-                .foregroundStyle(GalleryTheme.onAccentFill)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
-                .background(GalleryTheme.settingsAccent, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Sync data")
-            .accessibilityHint("Reloads the gallery list from files saved on this device")
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Operator Julian Vance, ID 8829 MK 4")
+        .accessibilityLabel("Glyph Canvas")
     }
 
     private var characterSetCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("STAMPS")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(GalleryTheme.bodyMuted)
-
             Picker("Stamp source", selection: stampSourceSettingsBinding) {
                 Text("Characters").tag(StampSourceMode.characters)
                 Text("Words").tag(StampSourceMode.words)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .accessibilityLabel("Stamp source")
 
             if profileStampMode == .words {
@@ -293,8 +358,7 @@ struct ProfileView: View {
                 TextEditor(text: $storedBaseCharacterSet)
                     .font(.system(.caption, design: .monospaced))
                     .frame(minHeight: 100)
-                    .padding(8)
-                    .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .scrollContentBackground(.hidden)
                     .foregroundStyle(GalleryTheme.headline)
                     .accessibilityLabel("Word source text")
             } else {
@@ -304,8 +368,6 @@ struct ProfileView: View {
                     .textInputAutocapitalization(.never)
                     #endif
                     .autocorrectionDisabled()
-                    .padding(10)
-                    .background(Color.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .foregroundStyle(GalleryTheme.headline)
                     .font(.system(.caption, design: .monospaced))
                     .accessibilityLabel("Character set")
@@ -318,40 +380,24 @@ struct ProfileView: View {
                 recentStampSetButtons
             }
 
-            Text("Unique stamps: \(profileActiveStampCount)")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(GalleryTheme.bodyMuted)
-
             if profileShowsStampFallback {
                 Text("Nothing usable in this input; default character set is used.")
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundStyle(GalleryTheme.bodyMuted)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
     }
 
     private var stampPresetButtons: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("ADD PRESET")
-                .font(.system(.caption2, design: .monospaced))
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Add preset")
+                .font(.caption)
                 .foregroundStyle(GalleryTheme.bodyMuted)
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: presetMinimumWidth), alignment: .leading)], alignment: .leading, spacing: 8) {
                 stampPresetButton("A–Z", PredefinedStampSets.uppercaseLetters)
                 stampPresetButton("a–z", PredefinedStampSets.lowercaseLetters)
                 stampPresetButton("0–9", PredefinedStampSets.digits)
-            }
-            HStack(spacing: 8) {
-                stampPresetButton("Punct", PredefinedStampSets.punctuation)
+                stampPresetButton("Punctuation", PredefinedStampSets.punctuation)
                 stampPresetButton("Emoji", PredefinedStampSets.emoji)
             }
         }
@@ -374,7 +420,7 @@ struct ProfileView: View {
                                 .foregroundStyle(GalleryTheme.bodyMuted)
                             Text(recent.displayLabel.isEmpty ? recent.rawInput : recent.displayLabel)
                                 .font(.system(.caption, design: .monospaced))
-                                .lineLimit(1)
+                                .lineLimit(2)
                                 .foregroundStyle(GalleryTheme.headline)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text("\(recent.stampCount)")
@@ -382,9 +428,9 @@ struct ProfileView: View {
                                 .foregroundStyle(GalleryTheme.bodyMuted)
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(GalleryTheme.settingsAccent)
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                    .tint(settingsAccent)
                 }
             }
         }
@@ -395,74 +441,41 @@ struct ProfileView: View {
             PredefinedStampSets.mergeAppendingUnique(into: &storedBaseCharacterSet, preset: preset)
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(GalleryTheme.settingsAccent)
+        .controlSize(.regular)
+        .tint(settingsAccent)
     }
 
     private var caseFilterCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("CASE FILTER")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(GalleryTheme.bodyMuted)
-
             Picker("Case filter", selection: caseModeSettingsBinding) {
                 ForEach(CharacterCaseMode.allCases, id: \.self) { mode in
-                    Image(systemName: mode.sfSymbolName)
+                    Text(mode.accessibilityLabel)
                         .tag(mode)
-                        .accessibilityLabel(mode.accessibilityLabel)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
     }
 
     private var optimizationModeCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("OPTIMIZATION MODE")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(GalleryTheme.bodyMuted)
-
             Picker("Optimization mode", selection: optimizationBinding) {
                 Text("Greedy").tag(OptimizationMode.greedy)
                 Text("Genetic").tag(OptimizationMode.genetic)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .accessibilityLabel("Optimization mode")
             .accessibilityHint("Greedy is faster per step; genetic searches more broadly in each region")
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
     }
 
     private var encodingComparisonModeCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("ENCODING COMPARISON")
-                .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(GalleryTheme.bodyMuted)
-
             Picker("Encoding comparison", selection: encodingComparisonBinding) {
                 Text("Match").tag(EncodingComparisonMode.perceptual)
                 Text("Edges").tag(EncodingComparisonMode.edges)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .accessibilityLabel("Encoding comparison")
             .accessibilityHint("Match follows color like the source; Edges prefers stamp ink along strong edges")
 
@@ -471,138 +484,37 @@ struct ProfileView: View {
                 .foregroundStyle(GalleryTheme.bodyMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
     }
 
     private var buildVersionCard: some View {
-        HStack(alignment: .center, spacing: 0) {
-            Rectangle()
-                .fill(GalleryTheme.settingsAccent)
-                .frame(width: 3)
-                .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("BUILD VERSION")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(GalleryTheme.bodyMuted)
-
-                Text("v\(GalleryTheme.marketingVersion)-STABLE")
-                    .font(.system(.title3, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(GalleryTheme.settingsAccent)
-            }
-            .padding(.leading, 12)
-            .padding(.vertical, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        LabeledContent("Build version") {
+            Text("v\(GalleryTheme.marketingVersion)-STABLE")
+                .font(.system(.body, design: .monospaced))
+                .foregroundStyle(settingsAccent)
         }
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Build version v \(GalleryTheme.marketingVersion) stable")
     }
 
     private var softwareUpdateCard: some View {
-        Button {
+        Button("Check for updates", systemImage: "arrow.up.right.square") {
             openAppStoreForUpdates()
-        } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("SOFTWARE UPDATE")
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(GalleryTheme.bodyMuted)
-
-                HStack {
-                    Text("CHECK FOR UPDATES")
-                        .font(.system(.subheadline, design: .monospaced).weight(.bold))
-                        .foregroundStyle(GalleryTheme.headline)
-                    Spacer(minLength: 0)
-                    Image(systemName: "arrow.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(GalleryTheme.headline)
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(GalleryTheme.settingsCardSurface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Check for updates")
         .accessibilityHint("Opens the App Store")
     }
 
     private var deleteDataRow: some View {
-        Button {
+        Button("Delete all data", systemImage: "trash", role: .destructive) {
             showDeleteConfirmation = true
-        } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "trash.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(GalleryTheme.settingsDanger)
-                    .accessibilityHidden(true)
-
-                Text("DELETE ALL DATA")
-                    .font(.system(.subheadline, design: .monospaced).weight(.bold))
-                    .foregroundStyle(GalleryTheme.settingsDanger)
-
-                Spacer(minLength: 0)
-
-                Text("IRREVERSIBLE")
-                    .font(.system(.caption2, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(GalleryTheme.settingsDanger.opacity(0.85))
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(GalleryTheme.settingsDanger.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(GalleryTheme.settingsDanger.opacity(0.55), lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Delete all data")
         .accessibilityHint("Permanently removes saved artworks and resets app settings. Cannot be undone.")
-    }
-
-    private var footerText: some View {
-        Text("MECHANICAL EDITOR INDUSTRIAL SUITE © 1994–2024")
-            .font(.system(.caption2, design: .monospaced))
-            .foregroundStyle(GalleryTheme.hudDetail)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, 8)
-            .accessibilityLabel("Mechanical Editor Industrial Suite copyright 1994 through 2024")
     }
 
     private func syncGalleryFromDisk() {
         do {
             try library.reloadFromDisk()
-            alertTitle = "Sync"
+            alertTitle = "Gallery reloaded"
             alertMessage = "Gallery index reloaded from disk."
         } catch {
-            alertTitle = "Sync failed"
+            alertTitle = "Reload failed"
             alertMessage = error.localizedDescription
         }
         showAlert = true
@@ -654,110 +566,65 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Section header
+// MARK: - Focused settings sections
 
-private struct SettingsSectionHeader: View {
-    let title: String
-    let dotColor: Color
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(dotColor)
-                .frame(width: 6, height: 6)
-                .accessibilityHidden(true)
-
-            Text(title)
-                .font(.system(.caption2, design: .monospaced).weight(.heavy))
-                .tracking(1.0)
-                .foregroundStyle(GalleryTheme.hudDetail)
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case preferences, encoding, system, critical
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .preferences: "Preferences"
+        case .encoding: "Encoding"
+        case .system: "System"
+        case .critical: "Critical actions"
         }
-        .padding(.top, 4)
+    }
+    var subtitle: String {
+        switch self {
+        case .preferences: "Detail, archive & gallery"
+        case .encoding: "Stamps, case & optimization"
+        case .system: "Version & updates"
+        case .critical: "Legal & local data"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .preferences: "slider.horizontal.3"
+        case .encoding: "textformat"
+        case .system: "info.circle"
+        case .critical: "exclamationmark.shield"
+        }
     }
 }
-
-// MARK: - Cards & rows
 
 private struct SettingsToggleRow: View {
     let title: String
     let subtitle: String
     @Binding var isOn: Bool
-    var accessibilityHintOverride: String? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
-                        .font(.system(.subheadline, design: .default).weight(.semibold))
-                        .foregroundStyle(GalleryTheme.headline)
-
-                    Text(subtitle)
-                        .font(.system(.caption, design: .default))
-                        .foregroundStyle(GalleryTheme.bodyMuted)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 12)
-
-                Toggle("", isOn: $isOn)
-                    .labelsHidden()
-                    .tint(GalleryTheme.settingsAccent)
-                    .accessibilityLabel(title)
-                    .accessibilityHint(accessibilityHintOverride ?? subtitle)
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(GalleryTheme.bodyMuted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(GalleryTheme.settingsCardSurface)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-        )
+        .accessibilityLabel(title)
+        .accessibilityHint(subtitle)
     }
 }
 
 private struct SettingsLinkRow: View {
     let icon: String
     let title: String
-    var accessibilityHint: String = "Opens in Safari"
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 18))
-                    .foregroundStyle(GalleryTheme.headline.opacity(0.9))
-                    .frame(width: 24, alignment: .center)
-                    .accessibilityHidden(true)
-
-                Text(title)
-                    .font(.system(.subheadline, design: .default).weight(.medium))
-                    .foregroundStyle(GalleryTheme.headline)
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "arrow.up.right.square")
-                    .font(.system(size: 16))
-                    .foregroundStyle(GalleryTheme.bodyMuted)
-                    .accessibilityHidden(true)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(GalleryTheme.settingsCardSurface)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(GalleryTheme.studioStroke.opacity(0.5), lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityHint(accessibilityHint)
+        Button(title, systemImage: icon, action: action)
+            .accessibilityHint("Opens in Safari")
     }
 }
 
