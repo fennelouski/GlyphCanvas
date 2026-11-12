@@ -15,7 +15,7 @@ struct PageURLPickItem: Identifiable {
     var id: String { url.absoluteString }
 }
 
-/// Shared async URL → image / HTML branch used by `URLImportSheet` and `WideStudioEmptyImportView`.
+/// Shared async URL → image / HTML branch used by `URLImportSheet`.
 enum URLImportFlow {
     enum Step {
         case decodedImage(CGImage, ImportHints?)

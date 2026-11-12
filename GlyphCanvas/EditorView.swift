@@ -10,19 +10,11 @@ import UIKit
 
 /// Owns a fresh `AppViewModel` per session; optionally restores a saved artwork.
 struct EditorView: View {
-    #if os(macOS)
-    private static let studioToolbarTrailingPlacement = ToolbarItemPlacement.primaryAction
-    #else
-    private static let studioToolbarTrailingPlacement = ToolbarItemPlacement.topBarTrailing
-    #endif
-
+    @Environment(\.appTheme) private var theme
     let resumeArtworkID: UUID?
     var autoPresentImagePicker: Binding<Bool>? = nil
-    /// When set (e.g. Studio tab), toolbar matches phone mock: grid → Gallery, sliders → controls.
-    var mainTab: Binding<MainTab>? = nil
 
     @StateObject private var viewModel = AppViewModel()
-    @State private var jumpToReviewSection = false
     @EnvironmentObject private var library: ArtworkLibrary
     @Environment(\.scenePhase) private var scenePhase
 
@@ -33,84 +25,8 @@ struct EditorView: View {
     #endif
 
     var body: some View {
-        ContentView(viewModel: viewModel, autoPresentImagePicker: autoPresentImagePicker, jumpToReviewSection: $jumpToReviewSection)
-            .toolbar {
-#if os(iOS)
-                if let mainTab {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button {
-                            mainTab.wrappedValue = .gallery
-                        } label: {
-                            Image(systemName: "square.grid.2x2")
-                                .foregroundStyle(GalleryTheme.hudDetail)
-                        }
-                        .accessibilityLabel("Gallery")
-                    }
-                    ToolbarItem(placement: .principal) {
-                        Text("STUDIO")
-                            .font(.subheadline.weight(.heavy))
-                            .tracking(1.2)
-                            .foregroundStyle(GalleryTheme.studioAccent)
-                    }
-                    ToolbarItem(placement: Self.studioToolbarTrailingPlacement) {
-                        Button {
-                            jumpToReviewSection = true
-                        } label: {
-                            Image(systemName: "slider.horizontal.3")
-                                .foregroundStyle(GalleryTheme.hudDetail)
-                        }
-                        .accessibilityLabel("Review, export, and advanced")
-                    }
-                } else {
-                    ToolbarItem(placement: .principal) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "slider.horizontal.3")
-                            Text("STUDIO_SESSION")
-                                .font(.subheadline.weight(.heavy))
-                                .tracking(1.0)
-                        }
-                        .foregroundStyle(GalleryTheme.studioAccent)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                    }
-                    ToolbarItemGroup(placement: Self.studioToolbarTrailingPlacement) {
-                        Button {
-                            jumpToReviewSection = true
-                        } label: {
-                            Image(systemName: "info.circle")
-                        }
-                        .accessibilityLabel("Review, export, and advanced")
-                        NavigationLink(value: StudioRoute.profile) {
-                            Image(systemName: "person.crop.circle.fill")
-                        }
-                    }
-                }
-#else
-                ToolbarItem(placement: .principal) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "slider.horizontal.3")
-                        Text("STUDIO_SESSION")
-                            .font(.subheadline.weight(.heavy))
-                            .tracking(1.0)
-                    }
-                    .foregroundStyle(GalleryTheme.studioAccent)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                }
-                ToolbarItemGroup(placement: Self.studioToolbarTrailingPlacement) {
-                    Button {
-                        jumpToReviewSection = true
-                    } label: {
-                        Image(systemName: "info.circle")
-                    }
-                    .accessibilityLabel("Review, export, and advanced")
-                    NavigationLink(value: StudioRoute.profile) {
-                        Image(systemName: "person.crop.circle.fill")
-                    }
-                }
-#endif
-            }
-            .navigationTitle("")
+        ContentView(viewModel: viewModel, autoPresentImagePicker: autoPresentImagePicker)
+            .navigationTitle("Studio")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
@@ -122,7 +38,7 @@ struct EditorView: View {
                     CharacterSetEditorView(viewModel: viewModel)
                 }
             }
-            .background(GalleryTheme.galleryScreenBackground)
+            .background(theme.screenBackground)
             .task(id: resumeArtworkID) {
                 guard let id = resumeArtworkID else { return }
                 await viewModel.restoreArtwork(id: id, library: library)

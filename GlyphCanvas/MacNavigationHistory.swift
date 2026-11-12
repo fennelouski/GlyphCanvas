@@ -8,7 +8,7 @@ import Foundation
 
 /// Owns tab selection and navigation paths for keyboard-driven back/forward (macOS).
 final class MacNavigationHistory: ObservableObject {
-    @Published var selectedTab: MainTab = .studio
+    @Published var selectedTab: MainTab = .gallery
 
     @Published var galleryPath: [AppRoute] = []
     private var galleryForward: [AppRoute] = []

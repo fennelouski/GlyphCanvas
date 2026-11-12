@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct ProfileView: View {
+    @Environment(\.appTheme) private var theme
     @AppStorage(GlyphCanvasStorageKey.baseCharacterSet) private var storedBaseCharacterSet = GlyphCanvasCharacterSetDefaults.baseString
     @AppStorage(GlyphCanvasStorageKey.stampSourceMode) private var storedStampSourceMode = StampSourceMode.characters.rawValue
     @AppStorage(GlyphCanvasStorageKey.characterCaseMode) private var storedCharacterCaseMode = CharacterCaseMode.both.rawValue
@@ -100,16 +101,11 @@ struct ProfileView: View {
     }
 
     private var settingsAccent: Color {
-        colorScheme == .dark ? GalleryTheme.settingsAccent : Color(red: 0.15, green: 0.38, blue: 0.67)
+        theme.accent
     }
 
     private var settingsBackground: some View {
-        LinearGradient(
-            colors: [settingsAccent.opacity(0.09), GalleryTheme.settingsScreenBackground],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-        .background(GalleryTheme.settingsScreenBackground)
+        theme.screenBackground.ignoresSafeArea()
     }
 
     private var sectionSidebar: some View {
@@ -153,6 +149,7 @@ struct ProfileView: View {
             } header: {
                 settingsHeader
             }
+            .listRowBackground(theme.cardSurface)
         }
         .scrollContentBackground(.hidden)
     }
@@ -180,8 +177,12 @@ struct ProfileView: View {
 
     private var sectionForm: some View {
         Form {
+            Group {
             switch selectedSection {
             case .preferences:
+                Section("Theme") {
+                    ThemePicker()
+                }
                 Section("Mosaics") {
                     SettingsToggleRow(
                         title: "High Detail Mode",
@@ -226,13 +227,19 @@ struct ProfileView: View {
                     softwareUpdateCard
                 }
             case .critical:
-                Section("Legal") {
-                    SettingsLinkRow(icon: "shield.lefthalf.filled", title: "Privacy Policy") {
-                        openBundledURL(infoPlistKey: "GlyphCanvasPrivacyPolicyURL", missingLabel: "Privacy Policy")
+                if let privacy = Self.bundledURL("GlyphCanvasPrivacyPolicyURL") {
+                    Section("Legal") {
+                        SettingsLinkRow(icon: "shield.lefthalf.filled", title: "Privacy Policy") { openURL(privacy) }
+                        if let terms = Self.bundledURL("GlyphCanvasTermsURL") {
+                            SettingsLinkRow(icon: "doc.text", title: "Terms of Service") { openURL(terms) }
+                        }
                     }
-                    SettingsLinkRow(icon: "doc.text", title: "Terms of Service") {
-                        openBundledURL(infoPlistKey: "GlyphCanvasTermsURL", missingLabel: "Terms of Service")
-                    }
+                }
+                Section {
+                    Label("Your photos and artworks stay on this device. GlyphCanvas has no accounts, ads or analytics.", systemImage: "lock")
+                        .font(.subheadline)
+                } header: {
+                    Text("Privacy")
                 }
                 Section {
                     deleteDataRow
@@ -242,6 +249,8 @@ struct ProfileView: View {
                     Text("Permanently removes saved artworks and resets app settings on this device. This cannot be undone.")
                 }
             }
+            }
+            .listRowBackground(theme.cardSurface)
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -324,17 +333,11 @@ struct ProfileView: View {
                 .foregroundStyle(settingsAccent)
                 .accessibilityHidden(true)
 
-            Text("GLYPH CANVAS")
-                .font(.system(.subheadline, design: .monospaced).weight(.heavy))
-                .tracking(0.8)
-                .foregroundStyle(settingsAccent)
+            Text("GlyphCanvas")
+                .font(.headline)
+                .foregroundStyle(GalleryTheme.headline)
 
             Spacer(minLength: 0)
-
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(GalleryTheme.bodyMuted)
-                .accessibilityHidden(true)
         }
         .padding(.bottom, 4)
         .accessibilityElement(children: .combine)
@@ -460,26 +463,26 @@ struct ProfileView: View {
     private var optimizationModeCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Optimization mode", selection: optimizationBinding) {
-                Text("Greedy").tag(OptimizationMode.greedy)
-                Text("Genetic").tag(OptimizationMode.genetic)
+                Text("Quick").tag(OptimizationMode.greedy)
+                Text("Evolutionary").tag(OptimizationMode.genetic)
             }
             .pickerStyle(.menu)
             .accessibilityLabel("Optimization mode")
-            .accessibilityHint("Greedy is faster per step; genetic searches more broadly in each region")
+            .accessibilityHint("Quick is faster per step; evolutionary searches more broadly in each region")
         }
     }
 
     private var encodingComparisonModeCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Picker("Encoding comparison", selection: encodingComparisonBinding) {
-                Text("Match").tag(EncodingComparisonMode.perceptual)
-                Text("Edges").tag(EncodingComparisonMode.edges)
+                Text("Match color").tag(EncodingComparisonMode.perceptual)
+                Text("Trace edges").tag(EncodingComparisonMode.edges)
             }
             .pickerStyle(.menu)
             .accessibilityLabel("Encoding comparison")
             .accessibilityHint("Match follows color like the source; Edges prefers stamp ink along strong edges")
 
-            Text("Edges mode places ink along outlines instead of matching interior color.")
+            Text("Trace edges places ink along outlines instead of matching interior color.")
                 .font(.caption2)
                 .foregroundStyle(GalleryTheme.bodyMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -488,9 +491,9 @@ struct ProfileView: View {
 
     private var buildVersionCard: some View {
         LabeledContent("Build version") {
-            Text("v\(GalleryTheme.marketingVersion)-STABLE")
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(settingsAccent)
+            Text("\(GalleryTheme.marketingVersion) (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"))")
+                .monospacedDigit()
+                .foregroundStyle(GalleryTheme.bodyMuted)
         }
     }
 
@@ -532,16 +535,11 @@ struct ProfileView: View {
         }
     }
 
-    private func openBundledURL(infoPlistKey: String, missingLabel: String) {
-        let raw = (Bundle.main.object(forInfoDictionaryKey: infoPlistKey) as? String)?
+    /// Non-empty URL from Info.plist, or nil so the row is hidden instead of dead.
+    private static func bundledURL(_ key: String) -> URL? {
+        let raw = (Bundle.main.object(forInfoDictionaryKey: key) as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !raw.isEmpty, let url = URL(string: raw) else {
-            alertTitle = "\(missingLabel) unavailable"
-            alertMessage = "Add \(infoPlistKey) to Info.plist with a valid URL."
-            showAlert = true
-            return
-        }
-        openURL(url)
+        return raw.isEmpty ? nil : URL(string: raw)
     }
 
     private func performDeleteAllData() {
@@ -574,17 +572,17 @@ private enum SettingsSection: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .preferences: "Preferences"
-        case .encoding: "Encoding"
-        case .system: "System"
-        case .critical: "Critical actions"
+        case .encoding: "Default style"
+        case .system: "About"
+        case .critical: "Privacy & data"
         }
     }
     var subtitle: String {
         switch self {
         case .preferences: "Detail, archive & gallery"
-        case .encoding: "Stamps, case & optimization"
+        case .encoding: "Glyphs and method for new artworks"
         case .system: "Version & updates"
-        case .critical: "Legal & local data"
+        case .critical: "Privacy, legal & local data"
         }
     }
     var symbol: String {
@@ -632,5 +630,39 @@ private struct SettingsLinkRow: View {
     NavigationStack {
         ProfileView()
             .environmentObject(ArtworkLibrary())
+    }
+}
+
+private struct ThemePicker: View {
+    @AppStorage(AppTheme.storageKey) private var storedTheme = AppTheme.aurora.rawValue
+    @ScaledMetric(relativeTo: .body) private var swatchSize = 52.0
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 14) {
+                ForEach(AppTheme.allCases) { option in
+                    let isSelected = option.rawValue == storedTheme
+                    Button {
+                        storedTheme = option.rawValue
+                    } label: {
+                        VStack(spacing: 6) {
+                            Circle()
+                                .fill(option.screenBackground)
+                                .overlay(Circle().fill(option.accent).padding(swatchSize * 0.32))
+                                .overlay(Circle().strokeBorder(isSelected ? option.accent : GalleryTheme.studioStroke, lineWidth: isSelected ? 3 : 1))
+                                .frame(width: swatchSize, height: swatchSize)
+                            Text(option.title)
+                                .font(.caption.weight(isSelected ? .semibold : .regular))
+                                .foregroundStyle(GalleryTheme.headline)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(option.title) theme")
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityIdentifier("settings.theme.\(option.rawValue)")
+                }
+            }
+            .padding(.vertical, 6)
+        }
     }
 }

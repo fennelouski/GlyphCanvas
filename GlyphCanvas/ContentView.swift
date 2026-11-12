@@ -18,6 +18,7 @@ private struct ImportAdjustItem: Identifiable {
 }
 
 struct ContentView: View {
+    @Environment(\.appTheme) private var theme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @AppStorage(GlyphCanvasStorageKey.baseCharacterSet) private var storedBaseCharacterSet = GlyphCanvasCharacterSetDefaults.baseString
@@ -34,22 +35,10 @@ struct ContentView: View {
     @ObservedObject var viewModel: AppViewModel
     @EnvironmentObject private var library: ArtworkLibrary
     var autoPresentImagePicker: Binding<Bool>? = nil
-    var jumpToReviewSection: Binding<Bool> = .constant(false)
 
     @State private var showStudioCanvasFullscreen = false
-    @State private var studioCanvasScrollDisabled = false
     @State private var importAdjustItem: ImportAdjustItem?
-    @State private var reviewExportAdvancedExpanded = false
-
-    init(
-        viewModel: AppViewModel,
-        autoPresentImagePicker: Binding<Bool>? = nil,
-        jumpToReviewSection: Binding<Bool> = .constant(false)
-    ) {
-        _viewModel = ObservedObject(wrappedValue: viewModel)
-        self.autoPresentImagePicker = autoPresentImagePicker
-        self.jumpToReviewSection = jumpToReviewSection
-    }
+    @State private var advancedExpanded = false
 
     var body: some View {
         studioRootWithSheets
@@ -57,12 +46,18 @@ struct ContentView: View {
 
     private var studioFramedLayout: some View {
         mainStudioLayout
-            .font(.system(.body, design: .monospaced))
-            .padding(.horizontal, studioContentHorizontalPadding)
-            .padding(.vertical, 12)
-            .background(GalleryTheme.galleryScreenBackground.ignoresSafeArea())
+            .background(theme.screenBackground.ignoresSafeArea())
             .onAppear {
                 applyStorageToViewModelOnAppear()
+                #if DEBUG
+                // Screenshot / UI-test hook: `-debugLoadImagePath /abs/path.jpg` loads an image without the picker.
+                if !viewModel.hasLoadedImage,
+                   let path = UserDefaults.standard.string(forKey: "debugLoadImagePath"),
+                   let data = FileManager.default.contents(atPath: path),
+                   let cg = ImageProcessing.decodeCGImage(data: data) {
+                    viewModel.loadImage(cg, hints: ImportHints(imageData: data))
+                }
+                #endif
             }
     }
 
@@ -243,166 +238,306 @@ struct ContentView: View {
         )
     }
 
-    /// Edge-to-edge canvas width on iPhone / compact; controls below stay inset.
-    private var studioCanvasShouldExpandToFullWidth: Bool {
-        guard viewModel.hasLoadedImage else { return false }
-        #if os(iOS)
-        return true
-        #else
-        return horizontalSizeClass == .compact
-        #endif
-    }
-
     private var characterSetSummaryLine: String {
-        let modeTag = viewModel.stampSourceMode == .words ? "words" : "chars"
-        let trimmed = storedBaseCharacterSet.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "\(modeTag) · (defaults) · \(viewModel.activeStamps.count) stamps" }
-        let maxLen = 36
-        let snippet: String
-        if trimmed.count <= maxLen { snippet = trimmed }
-        else { snippet = String(trimmed.prefix(maxLen)) + "…" }
-        return "\(modeTag) · \(snippet) · \(viewModel.activeStamps.count) stamps"
+        let stamps = viewModel.activeStamps
+        let preview = stamps.prefix(12).joined(separator: " ")
+        return stamps.count > 12 ? preview + " …" : preview
     }
 
-    private var studioContentHorizontalPadding: CGFloat {
-        studioCanvasShouldExpandToFullWidth ? 0 : 14
+    // MARK: - Layout
+
+    /// Side-by-side when there's room (iPad, Mac, unfolded iPhone Duo, landscape); otherwise preview pinned above controls.
+    private static func usesSideBySide(_ size: CGSize) -> Bool {
+        size.width >= 700 || size.width > size.height * 1.15
     }
 
     private var mainStudioLayout: some View {
-        Group {
-            if viewModel.hasLoadedImage {
-                ScrollViewReader { proxy in
+        GeometryReader { geo in
+            if !viewModel.hasLoadedImage {
+                emptyStudioLayout
+            } else if Self.usesSideBySide(geo.size) {
+                HStack(spacing: 0) {
+                    canvasArea
+                        .padding(16)
+                    Divider()
                     ScrollView {
-                        VStack(spacing: 14) {
-                            if studioCanvasShouldExpandToFullWidth {
-                                studioSetupPanel
-                                    .padding(.horizontal, 14)
-                                sourcePanel
-                                studioControlsColumn
-                                    .padding(.horizontal, 14)
-                            } else {
-                                studioSetupPanel
-                                sourcePanel
-                                studioControlsColumn
-                            }
-                        }
+                        inspector.padding(16)
                     }
-                    .scrollDisabled(studioCanvasScrollDisabled)
-                    .onChange(of: jumpToReviewSection.wrappedValue) { _, shouldJump in
-                        guard shouldJump else { return }
-                        reviewExportAdvancedExpanded = true
-                        withAnimation {
-                            proxy.scrollTo("studioReviewSection", anchor: .top)
-                        }
-                        jumpToReviewSection.wrappedValue = false
-                    }
+                    .frame(width: min(400, max(320, geo.size.width * 0.34)))
                 }
             } else {
-                emptyStudioSelectImageLayout
-            }
-        }
-    }
-
-    /// Encode transport, status, PARAMETERS, and secondary review/export/advanced — single column below the canvas when edge-to-edge.
-    private var studioControlsColumn: some View {
-        VStack(spacing: 14) {
-            encodingPanel
-            statusStrip
-            parameterPanel
-            studioReviewExportAdvancedCard
-        }
-    }
-
-    private var emptyStudioSelectImageLayout: some View {
-        ScrollView {
-            VStack(spacing: 14) {
-                Group {
-#if os(macOS)
-                    WideStudioEmptyImportView(
-                        onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
-                        autoPresentImagePicker: autoPresentImagePicker
-                    )
-#elseif os(iOS)
-                    if UIDevice.current.userInterfaceIdiom == .pad {
-                        WideStudioEmptyImportView(
-                            onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
-                            autoPresentImagePicker: autoPresentImagePicker
-                        )
-                    } else if UIDevice.current.userInterfaceIdiom == .phone {
-                        StudioEmptyStateView(
-                            onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
-                            autoPresentImagePicker: autoPresentImagePicker
-                        )
-                    } else {
-                        VStack(spacing: 0) {
-                            Spacer(minLength: 0)
-                            PlatformImagePicker(
-                                onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
-                                autoPresentImagePicker: autoPresentImagePicker
-                            )
-                            Spacer(minLength: 0)
-                        }
+                VStack(spacing: 0) {
+                    canvasArea
+                        .frame(height: min(geo.size.width, geo.size.height * 0.5))
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                    Divider()
+                    ScrollView {
+                        inspector.padding(.horizontal, 16).padding(.vertical, 12)
                     }
-#else
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        PlatformImagePicker(
-                            onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
-                            autoPresentImagePicker: autoPresentImagePicker
-                        )
-                        Spacer(minLength: 0)
-                    }
-#endif
                 }
-                studioSetupPanel
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onDrop(of: [UTType.image.identifier], isTargeted: nil) { providers in
             handleDrop(providers)
         }
     }
 
-    private var studioSetupPanel: some View {
-        StudioSectionCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Rectangle()
-                        .fill(GalleryTheme.studioAccent)
-                        .frame(width: 4, height: 16)
-                    Text("SETUP")
-                        .font(.title3.weight(.bold))
+    private var emptyStudioLayout: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                VStack(spacing: 14) {
+                    Image(systemName: "character.textbox")
+                        .font(.system(size: 52, weight: .regular))
+                        .foregroundStyle(theme.accent)
+                        .accessibilityHidden(true)
+                    Text("Start with a photo")
+                        .font(.title2.weight(.bold))
                         .foregroundStyle(GalleryTheme.headline)
-                    Spacer()
-                    Text("CT_SPEC_01")
-                        .font(.caption2.monospaced())
+                    Text("GlyphCanvas redraws it one character at a time. Change any setting and the artwork redraws immediately.")
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(GalleryTheme.bodyMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    PlatformImagePicker(
+                        onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
+                        autoPresentImagePicker: autoPresentImagePicker
+                    )
+                    .controlSize(.large)
+                    #if os(macOS)
+                    Text("or drop an image here")
+                        .font(.footnote)
+                        .foregroundStyle(GalleryTheme.hudDetail)
+                    #endif
+                }
+                .padding(.vertical, 32)
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity)
+                .background(theme.cardSurface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+                glyphsSection
+            }
+            .frame(maxWidth: 560)
+            .padding(16)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    // MARK: - Canvas
+
+    private var canvasArea: some View {
+        VStack(spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(theme.canvasBackdrop)
+                if let image = viewModel.displayImage {
+                    StudioMosaicInteractiveCanvas(
+                        displayImage: image,
+                        sourceOverlay: viewModel.sourceImageForOverlay,
+                        showSourceOverlay: viewModel.showSourceOverlay,
+                        imagePadding: 10,
+                        onRequestFullscreen: { showStudioCanvasFullscreen = true }
+                    )
+                }
+                statusPill.padding(10)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Artwork preview")
+            transportBar
+        }
+        #if os(iOS)
+        .fullScreenCover(isPresented: $showStudioCanvasFullscreen) { fullscreenCanvas }
+        #else
+        .sheet(isPresented: $showStudioCanvasFullscreen) { fullscreenCanvas.frame(minWidth: 720, minHeight: 560) }
+        #endif
+    }
+
+    @ViewBuilder
+    private var fullscreenCanvas: some View {
+        if let image = viewModel.displayImage {
+            StudioMosaicFullscreenShell(
+                displayImage: image,
+                sourceOverlay: viewModel.sourceImageForOverlay,
+                showSourceOverlay: viewModel.showSourceOverlay,
+                isPresented: $showStudioCanvasFullscreen
+            )
+        } else {
+            Color.clear.onAppear { showStudioCanvasFullscreen = false }
+        }
+    }
+
+    private var statusText: LocalizedStringKey {
+        if viewModel.isPlayingBack { return "Replaying" }
+        if viewModel.isRunning { return "Drawing" }
+        if viewModel.playbackIndex < viewModel.glyphHistory.count { return "Scrubbing" }
+        return "Paused"
+    }
+
+    private var statusPill: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(viewModel.isRunning || viewModel.isPlayingBack ? Color.green : Color.orange)
+                .frame(width: 7, height: 7)
+            Text(statusText)
+            Text("·")
+            Text("\(viewModel.glyphCount) glyphs")
+                .monospacedDigit()
+        }
+        .font(.caption.weight(.medium))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(.regularMaterial, in: Capsule())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var scrubBinding: Binding<Double> {
+        Binding(
+            get: { Double(min(max(0, viewModel.playbackIndex), viewModel.glyphHistory.count)) },
+            set: { viewModel.setTimelinePlaybackIndex(Int($0.rounded())) }
+        )
+    }
+
+    /// Play/pause encoding, replay the drawing, and scrub through history — always next to the preview.
+    private var transportBar: some View {
+        let count = viewModel.glyphHistory.count
+        let atLiveEdge = viewModel.playbackIndex == count
+        return HStack(spacing: 10) {
+            Button {
+                if viewModel.isPlayingBack {
+                    viewModel.togglePlayback(library: library)
+                } else if viewModel.isRunning {
+                    Task { await viewModel.pauseEncodingAndSuppressAutostart() }
+                } else if atLiveEdge {
+                    viewModel.start()
+                } else {
+                    Task {
+                        await viewModel.continueGenerationFromCurrentFrame()
+                        viewModel.start()
+                    }
+                }
+            } label: {
+                Image(systemName: viewModel.isRunning || viewModel.isPlayingBack ? "pause.fill" : "play.fill")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.space, modifiers: [])
+            .accessibilityLabel(viewModel.isRunning || viewModel.isPlayingBack ? "Pause" : (atLiveEdge ? "Draw" : "Continue drawing from here"))
+
+            Button {
+                viewModel.restartAnimation(library: library)
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.bordered)
+            .disabled(count == 0)
+            .accessibilityLabel("Replay drawing")
+
+            Group {
+                if count > 0 {
+                    Slider(value: scrubBinding, in: 0...Double(count), step: 1)
+                } else {
+                    // `step: 1` with `0...0` trips SwiftUI's Slider preconditions.
+                    Slider(value: .constant(0), in: 0...1).disabled(true)
+                }
+            }
+            .accessibilityLabel("Timeline")
+            .accessibilityValue("Glyph \(min(viewModel.playbackIndex, count)) of \(count)")
+        }
+    }
+
+    // MARK: - Inspector
+
+    private var inspector: some View {
+        VStack(spacing: 14) {
+            if let msg = viewModel.exportMessage {
+                Label(msg, systemImage: "checkmark.circle")
+                    .font(.footnote)
+                    .foregroundStyle(GalleryTheme.bodyMuted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            lookSection
+            glyphsSection
+            speedSection
+            actionsSection
+        }
+    }
+
+    private var lookSection: some View {
+        StudioSectionCard(title: "Look") {
+            Picker("Style", selection: $viewModel.encodingComparisonMode) {
+                Text("Match color").tag(EncodingComparisonMode.perceptual)
+                Text("Trace edges").tag(EncodingComparisonMode.edges)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Style")
+
+            StudioParameterSlider(
+                title: "Detail",
+                value: $viewModel.regionSize,
+                range: 4...24,
+                step: 1,
+                leftLabel: "Fine",
+                rightLabel: "Bold"
+            )
+            StudioParameterSlider(
+                title: "Glyph size",
+                value: $viewModel.averageFontSize,
+                range: 6...24,
+                step: 0.5,
+                leftLabel: "Small",
+                rightLabel: "Large",
+                format: "%.1f pt"
+            )
+            StudioParameterSlider(
+                title: "Color",
+                value: colorFidelityBinding,
+                range: 1...8,
+                step: 1,
+                leftLabel: "Posterized",
+                rightLabel: "True color"
+            )
+            Toggle("Show original underneath", isOn: $viewModel.showSourceOverlay)
+                .font(.subheadline)
+        }
+    }
+
+    private var glyphsSection: some View {
+        StudioSectionCard(title: "Glyphs") {
+            NavigationLink(value: StudioRoute.characterSetEditor) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(characterSetSummaryLine)
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(GalleryTheme.headline)
+                            .lineLimit(1)
+                        Text(viewModel.stampSourceMode == .words ? "\(viewModel.activeStamps.count) words" : "\(viewModel.activeStamps.count) characters")
+                            .font(.caption)
+                            .foregroundStyle(GalleryTheme.bodyMuted)
+                    }
+                    Spacer(minLength: 0)
+                    Text("Edit")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(theme.accent)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(GalleryTheme.hudDetail)
                 }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Edit glyphs")
 
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Set: \(characterSetSummaryLine)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(GalleryTheme.bodyMuted)
-                        .lineLimit(3)
-                    if viewModel.showsCharacterSetFallbackNotice {
-                        Text("No stamps from this input; using defaults.")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    NavigationLink(value: StudioRoute.characterSetEditor) {
-                        HStack {
-                            Text("Edit stamps")
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(GalleryTheme.hudDetail)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(GalleryTheme.headline)
-                }
+            if viewModel.showsCharacterSetFallbackNotice {
+                Text("Nothing usable in this input; using the default set.")
+                    .font(.caption)
+                    .foregroundStyle(GalleryTheme.bodyMuted)
+            }
 
-                Picker("Case filter", selection: caseModeBinding) {
+            if viewModel.stampSourceMode == .characters {
+                Picker("Letter case", selection: caseModeBinding) {
                     ForEach(CharacterCaseMode.allCases, id: \.self) { mode in
                         Image(systemName: mode.sfSymbolName)
                             .tag(mode)
@@ -410,405 +545,123 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-
-                Picker("Optimization mode", selection: $viewModel.optimizationMode) {
-                    Text("Greedy").tag(OptimizationMode.greedy)
-                    Text("Evolutionary").tag(OptimizationMode.genetic)
-                }
-                .pickerStyle(.segmented)
-
-                Text("Encoding")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(GalleryTheme.bodyMuted)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Picker("Encoding comparison", selection: $viewModel.encodingComparisonMode) {
-                    Text(EncodingComparisonMode.perceptual.displayLabel).tag(EncodingComparisonMode.perceptual)
-                    Text(EncodingComparisonMode.edges.displayLabel).tag(EncodingComparisonMode.edges)
-                }
-                .pickerStyle(.segmented)
-                .accessibilityLabel("Encoding comparison")
+                .accessibilityLabel("Letter case")
             }
         }
     }
 
-    private var sourcePanel: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.black.opacity(0.4))
-            if let image = viewModel.displayImage {
-                StudioMosaicInteractiveCanvas(
-                    displayImage: image,
-                    sourceOverlay: viewModel.sourceImageForOverlay,
-                    showSourceOverlay: viewModel.showSourceOverlay,
-                    imagePadding: 10,
-                    onRequestFullscreen: {
-                        showStudioCanvasFullscreen = true
-                    },
-                    scrollDisabledBinding: $studioCanvasScrollDisabled
-                )
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        PlatformImagePicker { cgImage, hints in
-                            stageImageForStudio(cgImage, hints: hints)
-                        }
+    private var speedSection: some View {
+        StudioSectionCard(title: "Drawing") {
+            StudioParameterSlider(
+                title: "Speed",
+                value: $viewModel.iterationsPerSecond,
+                range: 1...300,
+                step: 1,
+                leftLabel: "Slow",
+                rightLabel: "Fast",
+                format: "%.0f/s"
+            )
+            StudioParameterSlider(
+                title: "Replay speed",
+                value: $viewModel.playbackGlyphsPerSecond,
+                range: 1...120,
+                step: 1,
+                leftLabel: "Slow",
+                rightLabel: "Fast",
+                format: "%.0f/s"
+            )
+            Picker("Method", selection: $viewModel.optimizationMode) {
+                Text("Quick").tag(OptimizationMode.greedy)
+                Text("Evolutionary").tag(OptimizationMode.genetic)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Method")
+
+            DisclosureGroup("Advanced", isExpanded: $advancedExpanded) {
+                VStack(spacing: 14) {
+                    if viewModel.optimizationMode == .greedy {
+                        StudioParameterSlider(
+                            title: "Candidates per glyph",
+                            value: $viewModel.candidateCount,
+                            range: 2...12,
+                            step: 1,
+                            leftLabel: "Faster",
+                            rightLabel: "Better fit"
+                        )
+                    } else {
+                        StudioParameterSlider(
+                            title: "Population",
+                            value: $viewModel.geneticPopulation,
+                            range: 12...24,
+                            step: 1,
+                            leftLabel: "Faster",
+                            rightLabel: "Wider search"
+                        )
+                        StudioParameterSlider(
+                            title: "Generations",
+                            value: $viewModel.geneticGenerations,
+                            range: 5...15,
+                            step: 1,
+                            leftLabel: "Faster",
+                            rightLabel: "Better fit"
+                        )
+                        StudioParameterSlider(
+                            title: "Max evaluations",
+                            value: $viewModel.geneticMaxEvaluations,
+                            range: 32...256,
+                            step: 8,
+                            leftLabel: "Faster",
+                            rightLabel: "Better fit"
+                        )
+                    }
+                    Toggle("Show optimization details", isOn: $viewModel.debugOptimizationOverlay)
+                        .font(.subheadline)
+                    if viewModel.debugOptimizationOverlay {
+                        OptimizationDebugPanel(viewModel: viewModel)
                     }
                 }
-                .padding(12)
-            } else {
-                PlatformImagePicker(onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) })
+                .padding(.top, 10)
             }
-        }
-        .aspectRatio(1, contentMode: .fit)
-        .overlay(
-            DashedRoundedRectangle()
-                .stroke(style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
-                .foregroundStyle(GalleryTheme.studioStroke)
-        )
-        .onDrop(of: [UTType.image.identifier], isTargeted: nil) { providers in
-            handleDrop(providers)
-        }
-        #if os(iOS)
-        .fullScreenCover(isPresented: $showStudioCanvasFullscreen) {
-            Group {
-                if let image = viewModel.displayImage {
-                    StudioMosaicFullscreenShell(
-                        displayImage: image,
-                        sourceOverlay: viewModel.sourceImageForOverlay,
-                        showSourceOverlay: viewModel.showSourceOverlay,
-                        isPresented: $showStudioCanvasFullscreen
-                    )
-                } else {
-                    Color.clear
-                        .onAppear { showStudioCanvasFullscreen = false }
-                }
-            }
-        }
-        #else
-        .sheet(isPresented: $showStudioCanvasFullscreen) {
-            if let image = viewModel.displayImage {
-                StudioMosaicFullscreenShell(
-                    displayImage: image,
-                    sourceOverlay: viewModel.sourceImageForOverlay,
-                    showSourceOverlay: viewModel.showSourceOverlay,
-                    isPresented: $showStudioCanvasFullscreen
-                )
-            }
-        }
-        #endif
-    }
-
-    private var statusStrip: some View {
-        HStack(spacing: 8) {
-            Text("BUFFER: \(bufferEstimateLabel)")
-                .foregroundStyle(GalleryTheme.hudDetail)
-            Spacer()
-            Text("●")
-                .foregroundStyle(viewModel.isRunning ? GalleryTheme.studioAccent : GalleryTheme.studioStatusRed)
-            Text(viewModel.isRunning ? "ENCODING" : "STBY_MODE")
-                .foregroundStyle(viewModel.isRunning ? GalleryTheme.studioAccent : GalleryTheme.studioStatusRed)
-            Spacer()
-            Text("V.\(GalleryTheme.marketingVersion)_IND")
-                .foregroundStyle(GalleryTheme.hudDetail)
-        }
-        .font(.caption2.monospaced())
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(GalleryTheme.cardSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-    }
-
-    private var parameterPanel: some View {
-        StudioSectionCard {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Rectangle()
-                        .fill(GalleryTheme.studioAccent)
-                        .frame(width: 4, height: 16)
-                    Text("PARAMETERS")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(GalleryTheme.headline)
-                    Spacer()
-                    Text("CT_SPEC_09")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(GalleryTheme.hudDetail)
-                }
-
-                StudioParameterSlider(
-                    title: "DENSITY",
-                    value: $viewModel.regionSize,
-                    range: 4...24,
-                    step: 1,
-                    leftLabel: "FINE",
-                    rightLabel: "COARSE"
-                )
-                StudioParameterSlider(
-                    title: "IMPACT",
-                    value: $viewModel.iterationsPerSecond,
-                    range: 1...300,
-                    step: 1,
-                    leftLabel: "LIGHT",
-                    rightLabel: "HEAVY"
-                )
-                StudioParameterSlider(
-                    title: "INK_SPREAD",
-                    value: $viewModel.averageFontSize,
-                    range: 6...24,
-                    step: 0.5,
-                    leftLabel: "DRY",
-                    rightLabel: "SATURATED"
-                )
-                SliderRow(
-                    title: "Color fidelity",
-                    value: colorFidelityBinding,
-                    range: 1...8,
-                    step: 1,
-                    format: "%.0f"
-                )
-
-                HStack(spacing: 12) {
-                    Button {
-                        viewModel.reset()
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(!viewModel.hasLoadedImage)
-
-                    Button {
-                        viewModel.applyStudioPresetFromSettings()
-                    } label: {
-                        Image(systemName: "wand.and.stars")
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
+            .font(.subheadline)
         }
     }
 
-    private var encodingPanel: some View {
-        StudioSectionCard {
+    private var actionsSection: some View {
+        VStack(spacing: 10) {
+            Button {
+                Task { await viewModel.saveArtworkToLibrary(library: library) }
+            } label: {
+                Label("Save to Gallery", systemImage: "square.and.arrow.down")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
             HStack(spacing: 10) {
                 Button {
-                    if viewModel.isRunning {
-                        Task { await viewModel.pause() }
-                    } else {
-                        viewModel.start()
-                    }
-                } label: {
-                    Image(systemName: viewModel.isRunning ? "pause.fill" : "play.fill")
-                        .font(.headline.weight(.bold))
-                        .foregroundStyle(Color.black.opacity(0.8))
-                        .frame(width: 52, height: 44)
-                        .background(GalleryTheme.studioAccent, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(!viewModel.hasLoadedImage || viewModel.playbackIndex != viewModel.glyphHistory.count)
-
-                Button {
-                    if viewModel.isPlayingBack {
-                        viewModel.stopTimeline()
-                    } else if viewModel.isRunning {
-                        Task { await viewModel.pauseEncodingAndSuppressAutostart() }
-                    }
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.isPlayingBack && !viewModel.isRunning)
-
-                Button {
-                    viewModel.restartAnimation(library: library)
-                } label: {
-                    Image(systemName: "arrow.trianglehead.2.counterclockwise")
-                        .frame(width: 34, height: 34)
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.hasLoadedImage)
-                .accessibilityLabel("Restart animation")
-                .accessibilityHint("Replays or regenerates the mosaic depending on whether stamps or encoding settings changed")
-            }
-        }
-    }
-
-    private var studioReviewExportAdvancedCard: some View {
-        StudioSectionCard {
-            DisclosureGroup(isExpanded: $reviewExportAdvancedExpanded) {
-                reviewExportAdvancedContent
-                    .padding(.top, 8)
-            } label: {
-                HStack {
-                    Rectangle()
-                        .fill(GalleryTheme.studioAccent)
-                        .frame(width: 4, height: 16)
-                    Text("REVIEW, EXPORT & ADVANCED")
-                        .font(.title3.weight(.bold))
-                        .foregroundStyle(GalleryTheme.headline)
-                    Spacer()
-                    Text("CT_SPEC_10")
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(GalleryTheme.hudDetail)
-                }
-            }
-            .tint(GalleryTheme.studioAccent)
-        }
-        .id("studioReviewSection")
-    }
-
-    @ViewBuilder
-    private var reviewExportAdvancedContent: some View {
-        VStack(spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Button("Export PNG") {
                     viewModel.exportPNG(library: library)
+                } label: {
+                    Label("Export PNG", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
                 .disabled(viewModel.displayImage == nil)
 
-                Button("Save to gallery") {
-                    Task {
-                        await viewModel.saveArtworkToLibrary(library: library)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(!viewModel.hasLoadedImage)
-                Spacer()
-            }
-
-            Group {
-                let cap = max(0, viewModel.glyphHistory.count)
-                let scrubBinding = Binding<Double>(
-                    get: {
-                        let c = max(0, viewModel.glyphHistory.count)
-                        return Double(min(max(0, viewModel.playbackIndex), c))
-                    },
-                    set: { viewModel.setTimelinePlaybackIndex(Int($0.rounded())) }
+                PlatformImagePicker(
+                    onImagePicked: { cg, hints in stageImageForStudio(cg, hints: hints) },
+                    title: "New Image",
+                    prominent: false
                 )
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Timeline")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Glyph \(min(max(0, viewModel.playbackIndex), cap)) / \(cap)")
-                        .font(.caption.monospacedDigit())
-                    Group {
-                        if cap > 0 {
-                            Slider(
-                                value: scrubBinding,
-                                in: 0...Double(cap),
-                                step: 1
-                            )
-                        } else {
-                            // `step: 1` with `0...0` trips SwiftUI's Slider preconditions.
-                            Slider(value: scrubBinding, in: 0...0)
-                        }
-                    }
-                    .disabled(!viewModel.hasLoadedImage)
-                    HStack(spacing: 8) {
-                        Button(viewModel.isPlayingBack ? "Pause" : "Play") {
-                            viewModel.togglePlayback(library: library)
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!viewModel.hasLoadedImage || viewModel.glyphHistory.isEmpty)
-
-                        Button("Stop") {
-                            viewModel.stopTimeline()
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!viewModel.hasLoadedImage || viewModel.glyphHistory.isEmpty)
-
-                        Button("Continue from here") {
-                            Task { await viewModel.continueGenerationFromCurrentFrame() }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!viewModel.hasLoadedImage || viewModel.glyphHistory.isEmpty)
-                        Spacer()
-                    }
-                    SliderRow(
-                        title: "Playback glyphs/s",
-                        value: $viewModel.playbackGlyphsPerSecond,
-                        range: 1...120,
-                        step: 1,
-                        format: "%.0f"
-                    )
-                    .disabled(!viewModel.hasLoadedImage || viewModel.glyphHistory.isEmpty)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
 
-            HStack {
-                Text("Iterations: \(viewModel.iterationCount)")
-                Spacer()
-                Text("Glyphs: \(viewModel.glyphCount)")
+            Button("Reset settings", systemImage: "arrow.uturn.backward") {
+                viewModel.reset()
             }
-            .font(.caption.monospacedDigit())
-
-            HStack {
-                Text("Speed: \(viewModel.measuredIterationsPerSecond, format: .number.precision(.fractionLength(1))) /s")
-                Spacer()
-                Text("Target: \(viewModel.iterationsPerSecond, format: .number.precision(.fractionLength(0))) /s")
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
-
-            if let msg = viewModel.exportMessage {
-                Text(msg)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Toggle("Show source overlay", isOn: $viewModel.showSourceOverlay)
-                .disabled(!viewModel.hasLoadedImage)
-
-            Toggle("Show optimization debug", isOn: $viewModel.debugOptimizationOverlay)
-                .disabled(!viewModel.hasLoadedImage)
-
-            if viewModel.debugOptimizationOverlay, viewModel.hasLoadedImage {
-                OptimizationDebugPanel(viewModel: viewModel)
-            }
-
-            SliderRow(
-                title: "Candidates (greedy)",
-                value: $viewModel.candidateCount,
-                range: 2...12,
-                step: 1,
-                format: "%.0f"
-            )
-
-            if viewModel.optimizationMode == .genetic {
-                SliderRow(
-                    title: "GA population",
-                    value: $viewModel.geneticPopulation,
-                    range: 12...24,
-                    step: 1,
-                    format: "%.0f"
-                )
-                SliderRow(
-                    title: "GA generations",
-                    value: $viewModel.geneticGenerations,
-                    range: 5...15,
-                    step: 1,
-                    format: "%.0f"
-                )
-                SliderRow(
-                    title: "Max evals / region",
-                    value: $viewModel.geneticMaxEvaluations,
-                    range: 32...256,
-                    step: 8,
-                    format: "%.0f"
-                )
-            }
+            .font(.footnote)
+            .buttonStyle(.borderless)
+            .padding(.top, 4)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var bufferEstimateLabel: String {
-        guard let src = viewModel.sourceImageForOverlay else { return "0.0KB" }
-        let bytes = Double(src.width * src.height * 4)
-        let kb = bytes / 1024.0
-        return String(format: "%.1fKB", kb)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -868,26 +721,7 @@ private struct OptimizationDebugPanel: View {
     }
 }
 
-private struct SliderRow: View {
-    let title: String
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double
-    let format: String
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .frame(width: 120, alignment: .leading)
-            Slider(value: $value, in: range, step: step)
-            Text(String(format: format, value))
-                .frame(width: 48, alignment: .trailing)
-                .font(.caption.monospacedDigit())
-        }
-    }
-}
-
 #Preview {
-    ContentView(viewModel: AppViewModel(), jumpToReviewSection: .constant(false))
+    ContentView(viewModel: AppViewModel())
         .environmentObject(ArtworkLibrary())
 }

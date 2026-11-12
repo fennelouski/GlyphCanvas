@@ -6,6 +6,7 @@
 import SwiftUI
 
 struct CharacterSetEditorView: View {
+    @Environment(\.appTheme) private var theme
     @AppStorage(GlyphCanvasStorageKey.baseCharacterSet) private var storedBaseCharacterSet = GlyphCanvasCharacterSetDefaults.baseString
     @AppStorage(GlyphCanvasStorageKey.stampSourceMode) private var storedStampSourceMode = StampSourceMode.characters.rawValue
     @ObservedObject var viewModel: AppViewModel
@@ -70,7 +71,7 @@ struct CharacterSetEditorView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.system(.body, design: .monospaced))
-        .background(GalleryTheme.galleryScreenBackground.ignoresSafeArea())
+        .background(theme.screenBackground.ignoresSafeArea())
         .navigationTitle("Stamps")
         .onAppear {
             syncViewModelFromStorage()

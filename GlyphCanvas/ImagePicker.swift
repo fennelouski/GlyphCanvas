@@ -46,19 +46,34 @@ enum StudioImageFileImport {
 struct PlatformImagePicker: View {
     let onImagePicked: (CGImage, ImportHints?) -> Void
     var autoPresentImagePicker: Binding<Bool>?
+    var title: LocalizedStringKey
+    /// Prominent (filled) style for primary calls to action; otherwise inherits the surrounding button style.
+    var prominent: Bool
 
-    init(onImagePicked: @escaping (CGImage, ImportHints?) -> Void, autoPresentImagePicker: Binding<Bool>? = nil) {
+    init(
+        onImagePicked: @escaping (CGImage, ImportHints?) -> Void,
+        autoPresentImagePicker: Binding<Bool>? = nil,
+        title: LocalizedStringKey = "Select Image",
+        prominent: Bool = true
+    ) {
         self.onImagePicked = onImagePicked
         self.autoPresentImagePicker = autoPresentImagePicker
+        self.title = title
+        self.prominent = prominent
     }
 
     var body: some View {
 #if os(iOS) || os(visionOS)
-        IOSOrVisionImageSourceMenu(onImagePicked: onImagePicked, autoPresentImagePicker: autoPresentImagePicker) {
-            Label("Select Image", systemImage: "photo")
+        IOSOrVisionImageSourceMenu(
+            onImagePicked: onImagePicked,
+            autoPresentImagePicker: autoPresentImagePicker,
+            usesBorderedProminentButtonStyle: prominent
+        ) {
+            Label(title, systemImage: "photo")
+                .frame(maxWidth: prominent ? nil : .infinity)
         }
 #elseif os(macOS)
-        MacImageSourceMenu(onImagePicked: onImagePicked, autoPresentImagePicker: autoPresentImagePicker)
+        MacImageSourceMenu(onImagePicked: onImagePicked, autoPresentImagePicker: autoPresentImagePicker, title: title, prominent: prominent)
 #else
         EmptyView()
 #endif
@@ -177,7 +192,6 @@ struct IOSOrVisionImageSourceMenu<Label: View>: View {
                 } label: {
                     label()
                 }
-                .buttonStyle(.plain)
             }
         }
         .sheet(isPresented: $showImageSourceSheet) {
@@ -223,7 +237,7 @@ struct IOSOrVisionImageSourceMenu<Label: View>: View {
                 }
             }
         }
-        .onChange(of: autoPresentWatch) { _, shouldPresent in
+        .onChange(of: autoPresentWatch, initial: true) { _, shouldPresent in
             guard shouldPresent else { return }
             autoPresentImagePicker?.wrappedValue = false
             showImageSourceSheet = true
@@ -255,34 +269,24 @@ private struct MacImageSourceMenu: View {
     @State private var showURLSheet = false
     let onImagePicked: (CGImage, ImportHints?) -> Void
     var autoPresentImagePicker: Binding<Bool>?
+    var title: LocalizedStringKey
+    var prominent: Bool
 
     private var autoPresentWatch: Bool {
         autoPresentImagePicker?.wrappedValue ?? false
     }
 
-    var body: some View {
-        Menu {
-            PhotosPicker(
-                selection: $photosPickerItem,
-                matching: .images,
-                photoLibrary: .shared()
-            ) {
-                Label("Select from Photos", systemImage: "photo.on.rectangle")
-            }
-            Button {
-                StudioImageFileImport.presentOpenPanel(onImagePicked: onImagePicked)
-            } label: {
-                Label("Select from files", systemImage: "doc")
-            }
-            Button {
-                showURLSheet = true
-            } label: {
-                Label("Import from URL", systemImage: "link")
-            }
-        } label: {
-            Label("Select Image", systemImage: "photo")
+    @ViewBuilder
+    private var styledMenu: some View {
+        if prominent {
+            menu.buttonStyle(.borderedProminent)
+        } else {
+            menu
         }
-        .buttonStyle(.borderedProminent)
+    }
+
+    var body: some View {
+        styledMenu
         .onChange(of: photosPickerItem) { _, newValue in
             guard let newValue else { return }
             Task {
@@ -303,10 +307,34 @@ private struct MacImageSourceMenu: View {
         .sheet(isPresented: $showURLSheet) {
             URLImportSheet(onImagePicked: { cg, hints in onImagePicked(cg, hints) })
         }
-        .onChange(of: autoPresentWatch) { _, shouldPresent in
+        .onChange(of: autoPresentWatch, initial: true) { _, shouldPresent in
             guard shouldPresent else { return }
             autoPresentImagePicker?.wrappedValue = false
             StudioImageFileImport.presentOpenPanel(onImagePicked: onImagePicked)
+        }
+    }
+
+    private var menu: some View {
+        Menu {
+            PhotosPicker(
+                selection: $photosPickerItem,
+                matching: .images,
+                photoLibrary: .shared()
+            ) {
+                Label("Select from Photos", systemImage: "photo.on.rectangle")
+            }
+            Button {
+                StudioImageFileImport.presentOpenPanel(onImagePicked: onImagePicked)
+            } label: {
+                Label("Select from files", systemImage: "doc")
+            }
+            Button {
+                showURLSheet = true
+            } label: {
+                Label("Import from URL", systemImage: "link")
+            }
+        } label: {
+            Label(title, systemImage: "photo")
         }
     }
 }

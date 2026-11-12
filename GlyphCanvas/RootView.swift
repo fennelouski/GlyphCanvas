@@ -10,17 +10,29 @@ struct RootView: View {
     @StateObject private var navigationHistory = MacNavigationHistory()
     @State private var studioAutoPresentImagePicker = false
     @State private var scheduledGIFCachePrune = false
+    @AppStorage(AppTheme.storageKey) private var storedTheme = AppTheme.aurora.rawValue
+
+    private var theme: AppTheme { AppTheme(rawValue: storedTheme) ?? .aurora }
 
     var body: some View {
         tabContainer
             .environmentObject(library)
             .environmentObject(navigationHistory)
+            .environment(\.appTheme, theme)
             .onChange(of: navigationHistory.galleryPath) { old, new in
                 navigationHistory.handleGalleryPathChange(from: old, to: new)
             }
             .onChange(of: navigationHistory.studioPath) { old, new in
                 navigationHistory.handleStudioPathChange(from: old, to: new)
             }
+            #if DEBUG
+            .onAppear {
+                // Screenshot / UI-test hook: `-debugTab studio|settings|gallery`.
+                if let raw = UserDefaults.standard.string(forKey: "debugTab"), let tab = MainTab(rawValue: raw) {
+                    navigationHistory.selectedTab = tab
+                }
+            }
+            #endif
             .task {
                 guard !scheduledGIFCachePrune else { return }
                 scheduledGIFCachePrune = true
@@ -43,11 +55,18 @@ struct RootView: View {
 
     private var tabContainer: some View {
         TabView(selection: $navigationHistory.selectedTab) {
-            GalleryTabRoot(studioAutoPresentImagePicker: $studioAutoPresentImagePicker)
-            StudioTabRoot(studioAutoPresentImagePicker: $studioAutoPresentImagePicker)
-            SettingsTabRoot()
+            Tab("Home", systemImage: "house", value: MainTab.gallery) {
+                GalleryTabRoot(studioAutoPresentImagePicker: $studioAutoPresentImagePicker)
+            }
+            Tab("Studio", systemImage: "character.textbox", value: MainTab.studio) {
+                StudioTabRoot(studioAutoPresentImagePicker: $studioAutoPresentImagePicker)
+            }
+            Tab("Settings", systemImage: "gearshape", value: MainTab.settings) {
+                NavigationStack { ProfileView() }
+            }
         }
-        .tint(GalleryTheme.accent)
+        .tabViewStyle(.sidebarAdaptable)
+        .tint(theme.accent)
     }
 }
 
@@ -74,14 +93,6 @@ private struct GalleryTabRoot: View {
                 }
             }
         }
-        .tabItem {
-            Label {
-                Text("GALLERY")
-            } icon: {
-                Image(systemName: "square.grid.2x2")
-            }
-        }
-        .tag(MainTab.gallery)
     }
 }
 
@@ -93,33 +104,8 @@ private struct StudioTabRoot: View {
         NavigationStack(path: $navigationHistory.studioPath) {
             EditorView(
                 resumeArtworkID: nil,
-                autoPresentImagePicker: $studioAutoPresentImagePicker,
-                mainTab: $navigationHistory.selectedTab
+                autoPresentImagePicker: $studioAutoPresentImagePicker
             )
         }
-        .tabItem {
-            Label {
-                Text("STUDIO")
-            } icon: {
-                Image(systemName: "keyboard")
-            }
-        }
-        .tag(MainTab.studio)
-    }
-}
-
-private struct SettingsTabRoot: View {
-    var body: some View {
-        NavigationStack {
-            ProfileView()
-        }
-        .tabItem {
-            Label {
-                Text("SETTINGS")
-            } icon: {
-                Image(systemName: "gearshape.fill")
-            }
-        }
-        .tag(MainTab.settings)
     }
 }

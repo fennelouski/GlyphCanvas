@@ -123,6 +123,42 @@ final class AppViewModel: ObservableObject {
     private var importTitleRefinementGeneration: UInt = 0
     private var importGeocodeTask: Task<Void, Never>?
     private var lastEncodingSnapshot: EncodingSessionSnapshot?
+    /// True while the session mirrors a saved gallery artwork; the first live edit forks it so the saved piece is kept.
+    private var sessionIsRestoredArtwork = false
+    private var liveRegenerationCancellable: AnyCancellable?
+
+    init() {
+        // Any output-affecting setting change redraws the artwork from the source so the preview always reflects
+        // the current parameters (speed and playback rate are excluded: they don't change the result).
+        let triggers: [AnyPublisher<Void, Never>] = [
+            $regionSize.map { _ in () }.eraseToAnyPublisher(),
+            $candidateCount.map { _ in () }.eraseToAnyPublisher(),
+            $averageFontSize.map { _ in () }.eraseToAnyPublisher(),
+            $colorFidelity.map { _ in () }.eraseToAnyPublisher(),
+            $optimizationMode.map { _ in () }.eraseToAnyPublisher(),
+            $encodingComparisonMode.map { _ in () }.eraseToAnyPublisher(),
+            $geneticPopulation.map { _ in () }.eraseToAnyPublisher(),
+            $geneticGenerations.map { _ in () }.eraseToAnyPublisher(),
+            $geneticMaxEvaluations.map { _ in () }.eraseToAnyPublisher(),
+            $baseCharacterSet.map { _ in () }.eraseToAnyPublisher(),
+            $stampSourceMode.map { _ in () }.eraseToAnyPublisher(),
+            $characterCaseMode.map { _ in () }.eraseToAnyPublisher(),
+        ]
+        liveRegenerationCancellable = Publishers.MergeMany(triggers)
+            .debounce(for: .milliseconds(350), scheduler: RunLoop.main)
+            .sink { [weak self] in self?.regenerateIfOutputSettingsChanged() }
+    }
+
+    /// Redraws from source when an output-affecting setting differs from the running session.
+    func regenerateIfOutputSettingsChanged() {
+        guard hasLoadedImage, let last = lastEncodingSnapshot else { return }
+        guard EncodingSessionSnapshot.capture(from: self).ignoringSpeed != last.ignoringSpeed else { return }
+        if sessionIsRestoredArtwork {
+            activeArtworkID = nil
+            sessionIsRestoredArtwork = false
+        }
+        Task { await rebuildCanvasFromSource(applyStudioPreset: false) }
+    }
 }
 
 extension AppViewModel {
@@ -232,6 +268,7 @@ extension AppViewModel {
                     self.clearOptimizationDebug()
                     self.applyStudioPresetFromSettings()
                     self.activeArtworkID = nil
+                    self.sessionIsRestoredArtwork = false
                     self.encodingAutostartSuppressed = false
                     self.captureEncodingSessionSnapshot()
                     self.attemptEncodingAutostartIfEligible()
@@ -289,6 +326,7 @@ extension AppViewModel {
         if let task {
             await task.value
         }
+        autosave()
     }
 
     func pauseEncodingAndSuppressAutostart() async {
@@ -386,6 +424,12 @@ extension AppViewModel {
         }
     }
 
+    /// Silent background save so Home's gallery and "Continue" card reflect progress without a manual save.
+    fileprivate func autosave() {
+        guard let library = galleryLibrary, !glyphHistory.isEmpty else { return }
+        performPersistArtworkToLibrary(library: library, userInitiated: false, bumpCreatedAt: false, successMessage: nil)
+    }
+
     /// Archives the current canvas when starting a new image from the gallery, then clears the studio session.
     func beginNewImageSession(library: ArtworkLibrary) async {
         await pauseAndAwaitTask()
@@ -463,6 +507,7 @@ extension AppViewModel {
             clearOptimizationDebug()
             exportMessage = nil
             activeArtworkID = manifest.id
+            sessionIsRestoredArtwork = true
             pendingImportTitlePrefix = manifest.titlePrefix
             applyStudioPresetFromSettings()
             captureEncodingSessionSnapshot()
@@ -849,6 +894,25 @@ struct EncodingSessionSnapshot: Equatable {
         )
     }
 
+    /// Same settings with encoding speed zeroed; speed changes pacing, not the rendered result.
+    var ignoringSpeed: EncodingSessionSnapshot {
+        EncodingSessionSnapshot(
+            stampFingerprint: stampFingerprint,
+            stampSourceMode: stampSourceMode,
+            characterCaseMode: characterCaseMode,
+            iterationsPerSecond: 0,
+            averageFontSize: averageFontSize,
+            colorFidelity: colorFidelity,
+            regionSize: regionSize,
+            candidateCount: candidateCount,
+            optimizationMode: optimizationMode,
+            encodingComparisonMode: encodingComparisonMode,
+            geneticPopulation: geneticPopulation,
+            geneticGenerations: geneticGenerations,
+            geneticMaxEvaluations: geneticMaxEvaluations
+        )
+    }
+
     static func stampFingerprint(for stamps: [String]) -> String {
         stamps.sorted().joined(separator: "\u{1F}")
     }
@@ -957,6 +1021,9 @@ fileprivate func runGlyphOptimizationLoop(weakViewModel: AppViewModel?) async {
                     vm.glyphCount = vm.glyphHistory.count
                     if prevPlayback == prevCount {
                         vm.playbackIndex = vm.glyphHistory.count
+                    }
+                    if vm.glyphCount % 300 == 0 {
+                        vm.autosave()
                     }
                 }
             } catch {

@@ -7,6 +7,7 @@ import CoreGraphics
 import SwiftUI
 
 struct GalleryView: View {
+    @Environment(\.appTheme) private var theme
     @EnvironmentObject private var library: ArtworkLibrary
     @EnvironmentObject private var navigationHistory: MacNavigationHistory
     @StateObject private var holdPreviewPlayer = GalleryHoldPreviewPlayer()
@@ -20,130 +21,139 @@ struct GalleryView: View {
     @State private var fullscreenItem: GalleryFullscreenItem?
 
     var body: some View {
-        Group {
-            if library.entries.isEmpty {
-                LandingEmptyStateView(
-                    mainTab: $mainTab,
-                    studioAutoPresentImagePicker: $studioAutoPresentImagePicker
-                )
-            } else {
-                GeometryReader { geo in
-                    collectedGallery(geo: geo)
+        GeometryReader { geo in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    if geo.size.width >= 700 {
+                        HStack(alignment: .top, spacing: 16) {
+                            HomeCreateCard(action: startNewArtwork)
+                            if let latest = latestEntry {
+                                HomeContinueCard(entry: latest)
+                            }
+                        }
+                    } else {
+                        HomeCreateCard(action: startNewArtwork)
+                        if let latest = latestEntry {
+                            HomeContinueCard(entry: latest)
+                        }
+                    }
+                    if library.entries.isEmpty {
+                        HomeHowItWorks()
+                    } else {
+                        galleryGrid(width: min(geo.size.width, Self.maxContentWidth) - Self.horizontalPadding * 2)
+                    }
                 }
+                .padding(.horizontal, Self.horizontalPadding)
+                .padding(.top, 8)
+                .padding(.bottom, 32)
+                .frame(maxWidth: Self.maxContentWidth)
+                .frame(maxWidth: .infinity)
             }
         }
-        .background(library.entries.isEmpty ? GalleryTheme.background : GalleryTheme.galleryScreenBackground)
+        .background(theme.screenBackground)
         #if os(iOS)
         .toolbar(.hidden, for: .navigationBar)
-        #else
-        .navigationTitle("")
         #endif
+        .navigationTitle("Home")
         .refreshable {
             try? library.reloadFromDisk()
         }
         #if os(iOS)
         .fullScreenCover(item: $fullscreenItem) { item in
-            GalleryPlaybackFullscreenView(
-                artworkID: item.id,
-                isPresented: Binding(
-                    get: { fullscreenItem != nil },
-                    set: { if !$0 { fullscreenItem = nil } }
-                )
-            )
-            .environmentObject(library)
+            fullscreenPlayer(item)
         }
         #else
         .sheet(item: $fullscreenItem) { item in
-            GalleryPlaybackFullscreenView(
-                artworkID: item.id,
-                isPresented: Binding(
-                    get: { fullscreenItem != nil },
-                    set: { if !$0 { fullscreenItem = nil } }
-                )
-            )
-            .environmentObject(library)
-            .frame(minWidth: 720, minHeight: 560)
+            fullscreenPlayer(item)
+                .frame(minWidth: 720, minHeight: 560)
         }
         #endif
     }
 
-    // MARK: - Collected works (masonry)
+    private static let horizontalPadding: CGFloat = 20
+    private static let maxContentWidth: CGFloat = 1180
 
-    private func collectedGallery(geo: GeometryProxy) -> some View {
-        let horizontalPadding: CGFloat = 16
-        let spacing: CGFloat = 12
-        let columnCount = Self.columnCount(forWidth: geo.size.width)
-        let gutter = spacing * CGFloat(max(0, columnCount - 1))
-        let columnWidth = max(
-            72,
-            (geo.size.width - horizontalPadding * 2 - gutter) / CGFloat(columnCount)
+    private func fullscreenPlayer(_ item: GalleryFullscreenItem) -> some View {
+        GalleryPlaybackFullscreenView(
+            artworkID: item.id,
+            isPresented: Binding(
+                get: { fullscreenItem != nil },
+                set: { if !$0 { fullscreenItem = nil } }
+            )
         )
+        .environmentObject(library)
+    }
+
+    private var latestEntry: ArtworkIndexEntry? {
+        library.entries.max { $0.createdAt < $1.createdAt }
+    }
+
+    private func startNewArtwork() {
+        studioAutoPresentImagePicker = true
+        mainTab = .studio
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("GlyphCanvas")
+                .font(.largeTitle.weight(.bold))
+                .foregroundStyle(GalleryTheme.headline)
+                .accessibilityAddTraits(.isHeader)
+            Text("Turn any photo into art made of letters, numbers and emoji.")
+                .font(.subheadline)
+                .foregroundStyle(GalleryTheme.bodyMuted)
+        }
+        .padding(.top, 12)
+    }
+
+    // MARK: - Gallery (masonry)
+
+    private func galleryGrid(width: CGFloat) -> some View {
+        let spacing: CGFloat = 12
+        let columnCount = max(2, Int(width / 220))
+        let gutter = spacing * CGFloat(columnCount - 1)
+        let columnWidth = max(72, (width - gutter) / CGFloat(columnCount))
         let columns = Self.splitIntoMasonryColumns(
             library.entries,
             columnCount: columnCount,
             columnWidth: columnWidth,
             spacing: spacing
         )
-
-        return ZStack(alignment: .bottomTrailing) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    GalleryCollectedTopBar()
-                    GalleryArchiveHeader()
-
-                    HStack(alignment: .top, spacing: spacing) {
-                        ForEach(0..<columnCount, id: \.self) { index in
-                            VStack(spacing: spacing) {
-                                ForEach(columns[index]) { entry in
-                                    GalleryEntryTile(
-                                        entry: entry,
-                                        columnWidth: columnWidth,
-                                        holdPreviewPlayer: holdPreviewPlayer,
-                                        holdSessionID: $holdSessionID,
-                                        pressingEntryID: $pressingEntryID,
-                                        activePreviewEntryID: $activePreviewEntryID,
-                                        pressStartedAt: $pressStartedAt,
-                                        fullscreenItem: $fullscreenItem
-                                    )
-                                }
-                            }
-                            .frame(width: columnWidth)
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Gallery")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(GalleryTheme.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Text("\(library.entries.count)")
+                    .font(.title3.monospacedDigit())
+                    .foregroundStyle(GalleryTheme.hudDetail)
+                Spacer()
+            }
+            Text("Tap to open · press and hold to watch it draw")
+                .font(.footnote)
+                .foregroundStyle(GalleryTheme.bodyMuted)
+            HStack(alignment: .top, spacing: spacing) {
+                ForEach(0..<columnCount, id: \.self) { index in
+                    VStack(spacing: spacing) {
+                        ForEach(columns[index]) { entry in
+                            GalleryEntryTile(
+                                entry: entry,
+                                columnWidth: columnWidth,
+                                holdPreviewPlayer: holdPreviewPlayer,
+                                holdSessionID: $holdSessionID,
+                                pressingEntryID: $pressingEntryID,
+                                activePreviewEntryID: $activePreviewEntryID,
+                                pressStartedAt: $pressStartedAt,
+                                fullscreenItem: $fullscreenItem
+                            )
                         }
                     }
-                    .frame(maxWidth: .infinity)
-
-                    GalleryNewArchivePlaceholder {
-                        studioAutoPresentImagePicker = true
-                        mainTab = .studio
-                    }
-                    .padding(.top, 12)
+                    .frame(width: columnWidth)
                 }
-                .padding(.horizontal, horizontalPadding)
-                .padding(.bottom, 96)
             }
-
-            Button {
-                studioAutoPresentImagePicker = true
-                mainTab = .studio
-            } label: {
-                Image(systemName: "plus")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(GalleryTheme.onAccentFill)
-                    .frame(width: 56, height: 56)
-                    .background(GalleryTheme.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Create new artwork")
-            .padding(.trailing, 18)
-            .padding(.bottom, 6)
         }
-    }
-
-    /// 2 columns on phones / narrow; 3 on regular width (e.g. iPad, macOS).
-    private static func columnCount(forWidth width: CGFloat) -> Int {
-        if width >= 900 { return 3 }
-        return 2
     }
 
     /// Shortest-column assignment using estimated card height (image + metadata chrome).
@@ -166,14 +176,130 @@ struct GalleryView: View {
         return columns
     }
 
-    /// Matches `GalleryMasonryCard` layout: image height + footer block.
     private static func estimatedCardHeight(entry: ArtworkIndexEntry, columnWidth: CGFloat) -> CGFloat {
         let aspect = CGFloat(entry.canvasWidth) / CGFloat(max(1, entry.canvasHeight))
-        let imageHeight = columnWidth / max(0.01, aspect)
-        return imageHeight + cardFooterChrome
+        return columnWidth / max(0.01, aspect) + cardFooterChrome
     }
 
-    private static let cardFooterChrome: CGFloat = 86
+    private static let cardFooterChrome: CGFloat = 64
+}
+
+// MARK: - Home cards
+
+private struct HomeCreateCard: View {
+    @Environment(\.appTheme) private var theme
+    let action: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            HeroMosaicBackground()
+                .frame(width: 104, height: 104)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            VStack(alignment: .leading, spacing: 8) {
+                Text("New artwork")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(GalleryTheme.headline)
+                Text("Pick a photo from your library, camera, files or a web link.")
+                    .font(.subheadline)
+                    .foregroundStyle(GalleryTheme.bodyMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(action: action) {
+                    Label("Choose a Photo", systemImage: "photo.badge.plus")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.cardSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct HomeContinueCard: View {
+    @Environment(\.appTheme) private var theme
+    let entry: ArtworkIndexEntry
+    @EnvironmentObject private var library: ArtworkLibrary
+    @EnvironmentObject private var navigationHistory: MacNavigationHistory
+
+    private var title: String {
+        GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id)
+    }
+
+    var body: some View {
+        Button {
+            navigationHistory.galleryPath.append(.editorResume(entry.id))
+        } label: {
+            HStack(spacing: 16) {
+                AsyncImage(url: library.thumbURL(for: entry.id)) { image in
+                    image.resizable().interpolation(.none).scaledToFill()
+                } placeholder: {
+                    theme.canvasBackdrop
+                }
+                .frame(width: 104, height: 104)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Continue")
+                        .font(.footnote.weight(.semibold))
+                        .textCase(.uppercase)
+                        .foregroundStyle(theme.accent)
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(GalleryTheme.headline)
+                        .lineLimit(2)
+                    Text("\(entry.glyphCount) glyphs · \(entry.createdAt.formatted(.relative(presentation: .named)))")
+                        .font(.caption)
+                        .foregroundStyle(GalleryTheme.bodyMuted)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(GalleryTheme.hudDetail)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.cardSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Continue editing \(title)")
+    }
+}
+
+private struct HomeHowItWorks: View {
+    @Environment(\.appTheme) private var theme
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("How it works")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(GalleryTheme.headline)
+                .accessibilityAddTraits(.isHeader)
+            step("1", "photo", "Pick a photo", "Any image from Photos, the camera, Files or a link.")
+            step("2", "slider.horizontal.3", "Shape it live", "Change detail, glyph size, color or the characters used. The preview redraws immediately.")
+            step("3", "square.and.arrow.up", "Save and share", "Keep it in your gallery, export a PNG, or share an animated GIF of it being drawn.")
+        }
+        .padding(18)
+        .background(theme.cardSurface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    private func step(_ number: String, _ symbol: String, _ title: LocalizedStringKey, _ detail: LocalizedStringKey) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: symbol)
+                .font(.title3)
+                .foregroundStyle(theme.accent)
+                .frame(width: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline).foregroundStyle(GalleryTheme.headline)
+                Text(detail).font(.subheadline).foregroundStyle(GalleryTheme.bodyMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("Step \(number)"))
+    }
 }
 
 private struct GalleryFullscreenItem: Identifiable {
@@ -256,91 +382,10 @@ private struct GalleryEntryTile: View {
     }
 }
 
-// MARK: - Collected header & placeholder
-
-private struct GalleryCollectedTopBar: View {
-    var body: some View {
-        HStack {
-            Image(systemName: "square.grid.2x2")
-                .font(.body.weight(.semibold))
-                .foregroundStyle(GalleryTheme.accent)
-                .frame(width: 44, height: 40, alignment: .leading)
-                .accessibilityHidden(true)
-
-            Spacer(minLength: 0)
-
-            Text("GALLERY")
-                .font(.caption.monospaced().weight(.semibold))
-                .foregroundStyle(GalleryTheme.accent)
-                .tracking(0.8)
-
-            Spacer(minLength: 0)
-
-            Menu {
-                Button("About GlyphCanvas") {}
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(GalleryTheme.accent)
-                    .frame(width: 44, height: 40, alignment: .trailing)
-            }
-            .accessibilityLabel("Settings")
-        }
-        .padding(.top, 4)
-        .padding(.bottom, 4)
-    }
-}
-
-private struct GalleryArchiveHeader: View {
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            RoundedRectangle(cornerRadius: 1.5)
-                .fill(GalleryTheme.accent)
-                .frame(width: 3)
-                .frame(minHeight: 72, alignment: .top)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("SYSTEM OUTPUT // ARCHIVE")
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(GalleryTheme.accent)
-                Text("COLLECTED WORKS")
-                    .font(.title2.weight(.heavy))
-                    .foregroundStyle(GalleryTheme.headline)
-                Text("Visual computations rendered through mechanical character matrices. Stored in high-fidelity charcoal substrate.")
-                    .font(.subheadline)
-                    .foregroundStyle(GalleryTheme.bodyMuted)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.vertical, 12)
-        .padding(.bottom, 8)
-    }
-}
-
-private struct GalleryNewArchivePlaceholder: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "plus")
-                .font(.system(size: 52, weight: .medium))
-                .foregroundStyle(GalleryTheme.accent.opacity(0.85))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 44)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [7, 6]))
-                    .foregroundStyle(Color.white.opacity(0.2))
-            )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("New archive")
-    }
-}
-
 // MARK: - Masonry card
 
 private struct GalleryMasonryCard: View {
+    @Environment(\.appTheme) private var theme
     let entry: ArtworkIndexEntry
     let columnWidth: CGFloat
     var previewImage: CGImage?
@@ -363,22 +408,18 @@ private struct GalleryMasonryCard: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id))
-                    .font(.subheadline.weight(.heavy))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(GalleryTheme.headline)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.88)
 
                 Text(Self.formattedArchiveDate(entry.createdAt))
-                    .font(.caption2.monospaced())
+                    .font(.caption)
                     .foregroundStyle(GalleryTheme.bodyMuted)
             }
-            .padding(12)
+            .padding(10)
         }
-        .background(GalleryTheme.cardSurface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.06), lineWidth: 1)
-        )
+        .background(theme.cardSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(GalleryArchiveNaming.displayTitle(titlePrefix: entry.titlePrefix, for: entry.id)), \(Self.formattedArchiveDate(entry.createdAt))")
     }
@@ -395,7 +436,7 @@ private struct GalleryMasonryCard: View {
                     switch phase {
                     case .empty:
                         Rectangle()
-                            .fill(Color.white.opacity(0.06))
+                            .fill(theme.canvasBackdrop)
                             .overlay { ProgressView() }
                     case .success(let image):
                         image
@@ -404,7 +445,7 @@ private struct GalleryMasonryCard: View {
                             .scaledToFill()
                     case .failure:
                         Rectangle()
-                            .fill(Color.white.opacity(0.06))
+                            .fill(theme.canvasBackdrop)
                             .overlay {
                                 Image(systemName: "photo")
                                     .foregroundStyle(.secondary)
@@ -417,14 +458,7 @@ private struct GalleryMasonryCard: View {
         }
     }
 
-    private static let archiveDateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "MMM dd, yyyy"
-        return f
-    }()
-
     private static func formattedArchiveDate(_ date: Date) -> String {
-        archiveDateFormatter.string(from: date).uppercased()
+        date.formatted(date: .abbreviated, time: .omitted)
     }
 }
