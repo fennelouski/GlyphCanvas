@@ -59,6 +59,49 @@ struct GlyphCanvasTests {
         #expect(baseline != changed)
     }
 
+    @Test func liveRegenerationIgnoresSpeedButNotLook() {
+        let base = Self.makeEncodingSnapshot()
+        #expect(base.ignoringSpeed == Self.makeEncodingSnapshot(iterationsPerSecond: 280).ignoringSpeed)
+        #expect(base.ignoringSpeed != Self.makeEncodingSnapshot(regionSize: 20).ignoringSpeed)
+        #expect(base.ignoringSpeed != Self.makeEncodingSnapshot(encodingComparisonMode: .edges).ignoringSpeed)
+    }
+
+    /// Changing an output setting mid-encode must redraw from a blank canvas (history resets, then regrows).
+    @MainActor
+    @Test func changingDetailRedrawsFromScratch() async throws {
+        let vm = AppViewModel()
+        vm.loadImage(try Self.makeGradientImage(side: 96))
+        try await Self.waitUntil { vm.glyphCount >= 40 }
+        let before = vm.glyphCount
+        vm.regionSize = vm.regionSize == 20 ? 6 : 20
+        try await Self.waitUntil { vm.glyphCount < before && vm.glyphHistory.count == vm.glyphCount }
+        await vm.pause()
+    }
+
+    @MainActor
+    private static func waitUntil(timeout: Double = 8, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            guard Date() < deadline else {
+                Issue.record("Timed out waiting for condition")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    private static func makeGradientImage(side: Int) throws -> CGImage {
+        let ctx = try #require(CGContext(
+            data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        for x in 0..<side {
+            ctx.setFillColor(red: CGFloat(x) / CGFloat(side), green: 0.3, blue: 1 - CGFloat(x) / CGFloat(side), alpha: 1)
+            ctx.fill(CGRect(x: x, y: 0, width: 1, height: side))
+        }
+        return try #require(ctx.makeImage())
+    }
+
     @Test func encodingSessionSnapshotIgnoresPlaybackOnlyFields() {
         // Snapshots exclude playbackGlyphsPerSecond; two snapshots with identical encoding fields match.
         let a = Self.makeEncodingSnapshot()

@@ -37,7 +37,7 @@ enum GlyphCanvasStorageKey {
         for key in [
             baseCharacterSet, stampSourceMode, characterCaseMode, highDetailMode, autoArchive,
             showSourceOverlay, optimizationMode, encodingComparisonMode, debugOptimizationOverlay,
-            colorFidelity, recentStampSets
+            colorFidelity, recentStampSets, AppTheme.storageKey
         ] {
             UserDefaults.standard.removeObject(forKey: key)
         }
@@ -273,9 +273,9 @@ enum RecentStampSetStore {
     private static func normalizedInput(base: String, mode: CharacterCaseMode, source: StampSourceMode) -> String {
         switch source {
         case .characters:
-            return StampSetPipeline.filteredOrderedUniqueCharacters(from: base, mode: mode).joined(separator: "\u{1F}")
+            return StampSetPipeline.filteredOrderedUniqueCharacters(from: base, mode: mode).sorted().joined(separator: "\u{1F}")
         case .words:
-            return StampSetPipeline.filteredOrderedUniqueWords(from: base, mode: mode).joined(separator: "\u{1F}")
+            return StampSetPipeline.filteredOrderedUniqueWords(from: base, mode: mode).sorted().joined(separator: "\u{1F}")
         }
     }
 

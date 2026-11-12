@@ -6,6 +6,7 @@
 import SwiftUI
 
 struct GalleryPlaybackFullscreenView: View {
+    @Environment(\.appTheme) private var theme
     let artworkID: UUID
     @Binding var isPresented: Bool
 
@@ -31,7 +32,7 @@ struct GalleryPlaybackFullscreenView: View {
                 )
             } else {
                 ProgressView()
-                    .tint(GalleryTheme.accent)
+                    .tint(theme.accent)
             }
 
             if viewModel.isPlayingBack, !showPauseOverlay {
@@ -114,7 +115,7 @@ struct GalleryPlaybackFullscreenView: View {
         } label: {
             Image(systemName: favorited ? "heart.fill" : "heart")
                 .font(.title2.weight(.semibold))
-                .foregroundStyle(favorited ? GalleryTheme.accent : .white.opacity(0.9))
+                .foregroundStyle(favorited ? theme.accent : .white.opacity(0.9))
         }
         .buttonStyle(.plain)
     }
