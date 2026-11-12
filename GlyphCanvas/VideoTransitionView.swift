@@ -257,8 +257,9 @@ private struct TransitionInspector: View {
 
 // MARK: - Export result
 
-private struct ExportedVideoSheet: View {
+struct ExportedVideoSheet: View {
     let video: ExportedVideo
+    var title: LocalizedStringKey = "Your transition"
     @Environment(\.dismiss) private var dismiss
     @State private var player: AVPlayer?
 
@@ -267,7 +268,7 @@ private struct ExportedVideoSheet: View {
             VStack(spacing: 16) {
                 VideoPlayer(player: player)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                ShareLink(item: video.url, preview: SharePreview("Glyph transition")) {
+                ShareLink(item: video.url, preview: SharePreview(title)) {
                     Label("Share video", systemImage: "square.and.arrow.up")
                         .frame(maxWidth: .infinity)
                 }
@@ -275,7 +276,7 @@ private struct ExportedVideoSheet: View {
                 .controlSize(.large)
             }
             .padding()
-            .navigationTitle("Your transition")
+            .navigationTitle(title)
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif

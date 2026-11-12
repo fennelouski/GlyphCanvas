@@ -9,5 +9,6 @@ enum MainTab: String, CaseIterable, Hashable {
     case gallery
     case studio
     case transitions
+    case captions
     case settings
 }

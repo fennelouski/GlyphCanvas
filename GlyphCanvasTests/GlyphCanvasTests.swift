@@ -12,6 +12,40 @@ import Testing
 
 struct GlyphCanvasTests {
 
+    @Test func captionWordsGroupIntoLinesOnPausesAndLength() {
+        let words = [
+            CaptionWord(text: "hello", start: 0, end: 0.4),
+            CaptionWord(text: "there", start: 0.5, end: 0.9),
+            CaptionWord(text: "after", start: 3, end: 3.3),
+            CaptionWord(text: String(repeating: "x", count: 30), start: 3.4, end: 4)
+        ]
+        let lines = CaptionTranscriber.lines(from: words)
+        #expect(lines.map(\.text) == ["hello there", "after", String(repeating: "x", count: 30)])
+        #expect(lines[0].start == 0 && lines[0].end == 0.9)
+        #expect(CaptionLayout.activeIndex(in: lines, at: 1.2) == 0)
+        #expect(CaptionLayout.activeIndex(in: lines, at: 2) == nil)
+        #expect(CaptionLayout.opacity(of: lines[0], at: 0) == 0)
+        #expect(CaptionLayout.opacity(of: lines[0], at: 0.5) == 1)
+        #expect(CaptionLayout.opacity(of: lines[0], at: 1.5) == 0)
+    }
+
+    @Test func captionLayoutIsSolidAtBottomEmptyAboveHalfAndMostlyUpright() {
+        let size = CGSize(width: 1280, height: 720)
+        let words = CaptionLayout.placements(text: "the quick brown fox jumps", size: size, seed: 3)
+        #expect(!words.isEmpty)
+        #expect(words.allSatisfy { $0.center.y < size.height * 0.5 })
+        let band = words.filter { $0.center.y < size.height * 0.1 }
+        let upper = words.filter { $0.center.y >= size.height * 0.3 }
+        #expect(band.count > upper.count * 2, "density should fall off with height")
+        // Bottom rows tile the full width with no gaps wider than a space.
+        let firstRow = band.filter { abs($0.center.y - band[0].center.y) < 1 }.sorted { $0.center.x < $1.center.x }
+        #expect(firstRow.first!.center.x < 80 && firstRow.last!.center.x > size.width - 120)
+        #expect(words.allSatisfy { abs($0.rotation) <= 0.6 })
+        let tilted = words.filter { abs($0.rotation) > 0.35 }
+        #expect(Double(tilted.count) < Double(words.count) * 0.1)
+        #expect(CaptionLayout.placements(text: "the quick brown fox jumps", size: size, seed: 3) == words, "layout must be stable per line")
+    }
+
     @Test func revealStylesSettleAtRestAndStartVisiblyDifferent() {
         for style in GlyphRevealStyle.animated {
             let end = GlyphRevealMath.pose(style, t: 1, seed: 7)

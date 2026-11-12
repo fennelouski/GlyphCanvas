@@ -64,6 +64,9 @@ struct RootView: View {
             Tab("Transitions", systemImage: "film.stack", value: MainTab.transitions) {
                 VideoTransitionView()
             }
+            Tab("Captions", systemImage: "captions.bubble", value: MainTab.captions) {
+                CaptionVideoView()
+            }
             Tab("Settings", systemImage: "gearshape", value: MainTab.settings) {
                 NavigationStack { ProfileView() }
             }

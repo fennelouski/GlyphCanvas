@@ -6,6 +6,8 @@
 	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>GlyphCanvas uses the camera when you choose to take a new photo as the source image.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>GlyphCanvas listens to a video you pick to turn what's said into glyph captions.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>GlyphCanvas needs access to your photo library so you can pick a source image.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

@@ -58,7 +58,7 @@ final class MacNavigationHistory: ObservableObject {
         case .studio:
             guard !studioPath.isEmpty else { return }
             studioPath.removeLast()
-        case .settings, .transitions:
+        case .settings, .transitions, .captions:
             break
         }
     }
@@ -73,7 +73,7 @@ final class MacNavigationHistory: ObservableObject {
             guard let route = studioForward.popLast() else { return }
             skipStudioForwardClear = true
             studioPath.append(route)
-        case .settings, .transitions:
+        case .settings, .transitions, .captions:
             break
         }
     }

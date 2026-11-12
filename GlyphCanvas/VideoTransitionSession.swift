@@ -27,6 +27,24 @@ nonisolated struct PickedMovie: Transferable {
 struct ExportedVideo: Identifiable {
     let url: URL
     var id: URL { url }
+
+    /// Writes `asset` with its video composition to a tmp .mp4.
+    static func export(_ asset: AVAsset, videoComposition: AVVideoComposition, audioMix: AVAudioMix? = nil, name: String, progress: @escaping (Double) -> Void) async throws -> URL {
+        guard let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+            throw NSError(domain: "GlyphTransition", code: 4, userInfo: [NSLocalizedDescriptionKey: "Export isn't available on this device."])
+        }
+        session.videoComposition = videoComposition
+        session.audioMix = audioMix
+        let url = FileManager.default.temporaryDirectory.appending(path: "\(name)-\(UUID().uuidString.prefix(8)).mp4")
+        let progressTask = Task {
+            for await state in session.states(updateInterval: 0.1) {
+                if case .exporting(let p) = state { progress(p.fractionCompleted) }
+            }
+        }
+        defer { progressTask.cancel() }
+        try await session.export(to: url, as: .mp4)
+        return url
+    }
 }
 
 @Observable
@@ -195,21 +213,9 @@ final class VideoTransitionSession {
         }
         do {
             let built = try TransitionComposer.build(edit: edit, clip1: clip1, clip2: clip2, style: style, plan: plan)
-            guard let session = AVAssetExportSession(asset: built.composition, presetName: AVAssetExportPresetHighestQuality) else {
-                throw NSError(domain: "GlyphTransition", code: 4, userInfo: [NSLocalizedDescriptionKey: "Export isn't available on this device."])
+            let url = try await ExportedVideo.export(built.composition, videoComposition: built.videoComposition, audioMix: built.audioMix, name: "GlyphTransition") { [weak self] in
+                self?.exportProgress = $0
             }
-            session.videoComposition = built.videoComposition
-            session.audioMix = built.audioMix
-            let url = FileManager.default.temporaryDirectory.appending(path: "GlyphTransition-\(UUID().uuidString.prefix(8)).mp4")
-            let progressTask = Task { [weak self] in
-                for await state in session.states(updateInterval: 0.1) {
-                    if case .exporting(let progress) = state {
-                        self?.exportProgress = progress.fractionCompleted
-                    }
-                }
-            }
-            defer { progressTask.cancel() }
-            try await session.export(to: url, as: .mp4)
             exported = ExportedVideo(url: url)
         } catch {
             errorMessage = error.localizedDescription
