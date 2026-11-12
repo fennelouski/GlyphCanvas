@@ -336,6 +336,7 @@ struct ContentView: View {
                         sourceOverlay: viewModel.sourceImageForOverlay,
                         showSourceOverlay: viewModel.showSourceOverlay,
                         imagePadding: 10,
+                        recentGlyphs: viewModel.recentVisibleGlyphs,
                         onRequestFullscreen: { showStudioCanvasFullscreen = true }
                     )
                 }
@@ -360,6 +361,7 @@ struct ContentView: View {
                 displayImage: image,
                 sourceOverlay: viewModel.sourceImageForOverlay,
                 showSourceOverlay: viewModel.showSourceOverlay,
+                recentGlyphs: viewModel.recentVisibleGlyphs,
                 isPresented: $showStudioCanvasFullscreen
             )
         } else {
@@ -433,6 +435,8 @@ struct ContentView: View {
             .buttonStyle(.bordered)
             .disabled(count == 0)
             .accessibilityLabel("Replay drawing")
+
+            GlyphRevealStyleMenu()
 
             Group {
                 if count > 0 {

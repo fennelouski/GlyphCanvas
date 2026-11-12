@@ -540,6 +540,13 @@ extension AppViewModel {
         scoreEMA = nil
     }
 
+    /// Last few glyphs at or before the visible timeline position (feeds the reveal animation overlay).
+    var recentVisibleGlyphs: [GlyphOperation] {
+        let end = isPlayingBack || playbackIndex < glyphHistory.count ? playbackIndex : glyphHistory.count
+        let clamped = max(0, min(end, glyphHistory.count))
+        return Array(glyphHistory[max(0, clamped - 24)..<clamped])
+    }
+
     /// Updates `displayImage` from the engine snapshot (live) or history replay (scrub/playback).
     func refreshTimelineDisplay() async {
         guard let engine else {

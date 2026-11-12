@@ -12,6 +12,15 @@ import Testing
 
 struct GlyphCanvasTests {
 
+    @Test func revealStylesSettleAtRestAndStartVisiblyDifferent() {
+        for style in GlyphRevealStyle.animated {
+            let end = GlyphRevealMath.pose(style, t: 1, seed: 7)
+            #expect(end.opacity < 0.01, "\(style) should fade out to hand off to the committed glyph")
+            #expect(abs(end.scale - 1) < 0.05 && abs(end.scaleY - 1) < 0.05, "\(style) should end at its committed size")
+            #expect(abs(end.offset.width) < 0.05 && abs(end.offset.height) < 0.05, "\(style) should end at its committed position")
+        }
+    }
+
     @Test func historyCheckpointRenderMatchesFullReplay() async throws {
         let store = GlyphHistoryStore()
         try await store.reset(width: 64, height: 64)
@@ -849,5 +858,137 @@ private struct LCG64: RandomNumberGenerator {
     mutating func next() -> UInt64 {
         state = state &* 6364136223846793005 &+ 1442695040888963407
         return state
+    }
+}
+
+// MARK: - Video transition
+
+import AVFoundation
+
+@MainActor
+struct VideoTransitionTests {
+    @Test func pacingIsMonotonicAndInvertible() {
+        let total = 400
+        var last = -1.0
+        for step in 0...100 {
+            let r = GlyphTransitionPacing.revealed(at: Double(step) / 50, total: total, start: 0.5, cut: 1.5)
+            #expect(r >= last)
+            last = r
+        }
+        #expect(last == Double(total))
+        for i in [0, 10, 199, 399] {
+            let b = GlyphTransitionPacing.birth(of: i, total: total, start: 0.5, cut: 1.5)
+            #expect(abs(GlyphTransitionPacing.revealed(at: b, total: total, start: 0.5, cut: 1.5) - Double(i + 1)) < 1e-6)
+        }
+    }
+
+    @Test func editClampKeepsCutInsideClipOne() {
+        var e = TransitionEdit(clip1Duration: 4, clip2Duration: 3)
+        e.clip1In = 3.5
+        e.cut = 10
+        e.transitionStart = 20
+        e.clip2Out = 1
+        e.clip2In = 2
+        e.clamp()
+        #expect(e.cut <= e.clip1Available + 1e-9)
+        #expect(e.transitionStart < e.cut)
+        #expect(e.clip2Out > e.clip2In)
+        #expect(e.outputDuration == e.cut + e.clip2Length)
+    }
+
+    /// Red clip → green clip: before the build it's red, mid-build red with green-ish glyphs, after the cut green.
+    @Test func exportRendersGlyphBuildThenCutsToClipTwo() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: "glyph-transition-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let red = try await Self.makeSolidVideo(at: dir.appending(path: "red.mov"), rgb: (230, 20, 20), seconds: 3)
+        let green = try await Self.makeSolidVideo(at: dir.appending(path: "green.mov"), rgb: (20, 200, 40), seconds: 2)
+
+        let s1 = try await TransitionSource.load(red)
+        let s2 = try await TransitionSource.load(green)
+        var edit = TransitionEdit(clip1Duration: s1.duration, clip2Duration: s2.duration)
+        edit.transitionStart = 0.5
+        edit.cut = 1.5
+        edit.coverage = 0.6
+        edit.clamp()
+
+        let frame = try await TransitionComposer.planningFrame(of: s2, at: 0, renderSize: s1.renderSize)
+        let plan = try await TransitionComposer.makePlan(frame: frame, coverage: edit.coverage) { _ in }
+        #expect(plan.ops.count >= 300)
+
+        let built = try TransitionComposer.build(edit: edit, clip1: s1, clip2: s2, style: .pop, plan: plan)
+        let session = try #require(AVAssetExportSession(asset: built.composition, presetName: AVAssetExportPresetHighestQuality))
+        session.videoComposition = built.videoComposition
+        session.audioMix = built.audioMix
+        let out = dir.appending(path: "out.mp4")
+        try await session.export(to: out, as: .mp4)
+
+        let result = AVURLAsset(url: out)
+        let duration = try await result.load(.duration).seconds
+        #expect(abs(duration - edit.outputDuration) < 0.1)
+
+        let gen = AVAssetImageGenerator(asset: result)
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        func greenShare(at t: Double) async throws -> Double {
+            let (img, _) = try await gen.image(at: CMTime(seconds: t, preferredTimescale: 600))
+            let (r, g) = Self.meanRG(img)
+            return g / max(1, r + g)
+        }
+        let before = try await greenShare(at: 0.2)
+        let during = try await greenShare(at: 1.45)
+        let after = try await greenShare(at: 2.5)
+        #expect(before < 0.15)
+        #expect(during > before + 0.15, "glyphs of clip 2 should be visible over clip 1 near the cut")
+        #expect(after > 0.8)
+    }
+
+    static func meanRG(_ image: CGImage) -> (Double, Double) {
+        let w = 32, h = 32
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+        var r = 0.0, g = 0.0
+        for i in stride(from: 0, to: px.count, by: 4) {
+            r += Double(px[i])
+            g += Double(px[i + 1])
+        }
+        return (r / Double(w * h), g / Double(w * h))
+    }
+
+    static func makeSolidVideo(at url: URL, rgb: (UInt8, UInt8, UInt8), seconds: Int) async throws -> URL {
+        let w = 320, h = 240, fps: Int32 = 30
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: w, AVVideoHeightKey: h
+        ])
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+            kCVPixelBufferWidthKey as String: w, kCVPixelBufferHeightKey as String: h
+        ])
+        writer.add(input)
+        writer.startWriting()
+        writer.startSession(atSourceTime: .zero)
+        for f in 0..<(seconds * Int(fps)) {
+            while !input.isReadyForMoreMediaData { try await Task.sleep(for: .milliseconds(2)) }
+            var buffer: CVPixelBuffer?
+            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+            let pb = try #require(buffer)
+            CVPixelBufferLockBaseAddress(pb, [])
+            let base = CVPixelBufferGetBaseAddress(pb)!.assumingMemoryBound(to: UInt8.self)
+            let bpr = CVPixelBufferGetBytesPerRow(pb)
+            for y in 0..<h {
+                for x in 0..<w {
+                    let p = base + y * bpr + x * 4
+                    p[0] = rgb.2; p[1] = rgb.1; p[2] = rgb.0; p[3] = 255
+                }
+            }
+            CVPixelBufferUnlockBaseAddress(pb, [])
+            adaptor.append(pb, withPresentationTime: CMTime(value: CMTimeValue(f), timescale: fps))
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        return url
     }
 }
