@@ -61,6 +61,9 @@ struct RootView: View {
             Tab("Studio", systemImage: "character.textbox", value: MainTab.studio) {
                 StudioTabRoot(studioAutoPresentImagePicker: $studioAutoPresentImagePicker)
             }
+            Tab("Transitions", systemImage: "film.stack", value: MainTab.transitions) {
+                VideoTransitionView()
+            }
             Tab("Settings", systemImage: "gearshape", value: MainTab.settings) {
                 NavigationStack { ProfileView() }
             }

@@ -27,6 +27,7 @@ struct GalleryPlaybackFullscreenView: View {
                     sourceOverlay: viewModel.sourceImageForOverlay,
                     showSourceOverlay: viewModel.showSourceOverlay,
                     imagePadding: 10,
+                    recentGlyphs: viewModel.recentVisibleGlyphs,
                     onRequestFullscreen: nil,
                     scrollDisabledBinding: nil
                 )

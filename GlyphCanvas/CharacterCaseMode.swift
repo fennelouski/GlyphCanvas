@@ -37,7 +37,7 @@ enum GlyphCanvasStorageKey {
         for key in [
             baseCharacterSet, stampSourceMode, characterCaseMode, highDetailMode, autoArchive,
             showSourceOverlay, optimizationMode, encodingComparisonMode, debugOptimizationOverlay,
-            colorFidelity, recentStampSets, AppTheme.storageKey
+            colorFidelity, recentStampSets, AppTheme.storageKey, GlyphRevealStyle.storageKey
         ] {
             UserDefaults.standard.removeObject(forKey: key)
         }

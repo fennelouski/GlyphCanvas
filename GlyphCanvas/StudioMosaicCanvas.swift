@@ -28,6 +28,7 @@ struct StudioMosaicLayers: View {
     var sourceOverlay: CGImage?
     var showSourceOverlay: Bool
     var imagePadding: CGFloat = 10
+    var recentGlyphs: [GlyphOperation] = []
 
     var body: some View {
         ZStack {
@@ -35,6 +36,9 @@ struct StudioMosaicLayers: View {
                 .resizable()
                 .interpolation(.none)
                 .scaledToFit()
+                .overlay {
+                    GlyphRevealOverlay(recentGlyphs: recentGlyphs, imagePixelWidth: displayImage.width)
+                }
                 .padding(imagePadding)
             if showSourceOverlay, let source = sourceOverlay {
                 Image(decorative: source, scale: 1.0)
@@ -56,6 +60,7 @@ struct StudioMosaicInteractiveCanvas: View {
     var sourceOverlay: CGImage?
     var showSourceOverlay: Bool
     var imagePadding: CGFloat = 10
+    var recentGlyphs: [GlyphOperation] = []
 
     /// When set, single-tap opens fullscreen (embedded mode only).
     var onRequestFullscreen: (() -> Void)?
@@ -86,7 +91,8 @@ struct StudioMosaicInteractiveCanvas: View {
                     displayImage: displayImage,
                     sourceOverlay: sourceOverlay,
                     showSourceOverlay: showSourceOverlay,
-                    imagePadding: imagePadding
+                    imagePadding: imagePadding,
+                    recentGlyphs: recentGlyphs
                 )
                 .scaleEffect(liveScale, anchor: .center)
                 .offset(dragOffset)
@@ -232,6 +238,7 @@ struct StudioMosaicFullscreenShell: View {
     let displayImage: CGImage
     var sourceOverlay: CGImage?
     var showSourceOverlay: Bool
+    var recentGlyphs: [GlyphOperation] = []
     @Binding var isPresented: Bool
 
     var body: some View {
@@ -241,6 +248,7 @@ struct StudioMosaicFullscreenShell: View {
                 sourceOverlay: sourceOverlay,
                 showSourceOverlay: showSourceOverlay,
                 imagePadding: 10,
+                recentGlyphs: recentGlyphs,
                 onRequestFullscreen: nil,
                 scrollDisabledBinding: nil
             )
